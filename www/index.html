@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>模型收藏</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- 顶栏(固定容器) -->
+  <div class="top-fixed" id="topFixed">
+  <header class="app-bar">
+    <div class="app-title">
+      <span class="logo">✦</span>
+      <span>模型收藏</span>
+    </div>
+    <div class="app-actions">
+      <button class="icon-btn" id="btnSearch">搜索</button>
+      <div class="edit-wrap">
+        <button class="icon-btn" id="btnEdit">编辑</button>
+        <div class="edit-menu hidden" id="editMenu">
+          <button class="edit-menu-item" id="btnImport">导入</button>
+          <button class="edit-menu-item" id="btnExport">导出</button>
+          <button class="edit-menu-item" id="btnSort">排序</button>
+        </div>
+      </div>
+      <button class="icon-btn hidden" id="btnExitSort">退出排序</button>
+    </div>
+  </header>
+
+  <!-- 搜索栏 (默认隐藏) -->
+  <div class="search-wrap hidden" id="searchWrap">
+    <div class="search-box">
+      <select id="searchScope" class="search-scope">
+        <option value="all" selected>全部</option>
+        <option value="name">名称</option>
+        <option value="tag">标签</option>
+      </select>
+      <input type="text" id="searchInput" placeholder="搜索...">
+      <button class="icon-btn" id="btnSearchSubmit" type="button">搜索</button>
+    </div>
+    <div class="search-sug hidden" id="searchSug"></div>
+  </div>
+
+  <!-- 筛选 Tab + 排序 -->
+  <div class="toolbar" id="toolbar">
+    <nav class="tabs">
+      <button class="tab active" data-filter="all">全部 <span class="count" id="countAll">0</span></button>
+      <button class="tab" data-filter="bought">已买 <span class="count" id="countBought">0</span></button>
+      <button class="tab" data-filter="wish">未买 <span class="count" id="countWish">0</span></button>
+    </nav>
+    <div class="sort-wrap hidden" id="sortWrap">
+      <span class="sort-label">排序</span>
+      <select id="sortSelect" class="sort-select">
+        <option value="time">按时间（新→旧）</option>
+        <option value="priceAsc">价格 低→高</option>
+        <option value="priceDesc">价格 高→低</option>
+      </select>
+    </div>
+  </div>
+  </div><!-- /top-fixed -->
+
+  <!-- 卡片列表 -->
+  <main class="list" id="cardList">
+    <div class="empty-state hidden" id="emptyState">
+      <div class="empty-icon">🗂️</div>
+      <p id="emptyText">还没有记录，点下方 ＋ 添加第一个模型吧</p>
+    </div>
+  </main>
+
+  <!-- 底部悬浮添加按钮 -->
+  <button class="fab" id="btnAdd" title="添加记录">＋</button>
+
+  <!-- 编辑/添加弹窗 -->
+  <div class="modal-mask hidden center" id="modalMask">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="modalTitle">添加记录</span>
+        <button class="icon-btn modal-close" id="btnModalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>模型名称</label>
+          <input type="text" id="inpName">
+        </div>
+
+        <div class="field">
+          <label>品牌 / 厂商 / 系列</label>
+          <div class="tag-input-row">
+            <input type="text" id="inpBrand" placeholder="输入品牌，如：万代">
+            <button class="btn-add-tag" id="btnAddBrand" type="button">添加</button>
+          </div>
+          <div class="tag-chips" id="brandChips"></div>
+        </div>
+
+        <div class="field">
+          <label>状态</label>
+          <div class="seg">
+            <button class="seg-btn" data-kind="bought" id="kindBought">已买</button>
+            <button class="seg-btn active" data-kind="wish" id="kindWish">未买</button>
+          </div>
+        </div>
+
+        <div class="field" id="priceGroup">
+          <label>购买价格 (元)</label>
+          <input type="number" id="inpPrice" step="0.01" min="0">
+        </div>
+
+        <div class="field" id="dateGroup">
+          <label>购买日期</label>
+          <input type="date" id="inpDate">
+        </div>
+
+        <div class="field">
+          <label>标签（可选，用于搜索）</label>
+          <div class="tag-input-row">
+            <input type="text" id="inpTag" placeholder="输入标签，如：高达">
+            <button class="btn-add-tag" id="btnAddTag" type="button">添加</button>
+          </div>
+          <div class="tag-chips" id="tagChips"></div>
+        </div>
+
+        <div class="field">
+          <label>图片（最多 30 张，已选 <span id="imgCount">0</span>/30）</label>
+          <div class="img-grid" id="imgGrid"></div>
+          <button class="btn-add-img" id="btnAddImg">＋ 添加图片</button>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-cancel" id="btnCancel">取消</button>
+        <button class="btn btn-save" id="btnSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 确认删除弹窗 -->
+  <div class="modal-mask hidden center" id="confirmMask">
+    <div class="confirm-sheet">
+      <div class="confirm-icon"><span>🗑️</span></div>
+      <div class="confirm-title">删除记录</div>
+      <p class="confirm-text">确定要删除「<span id="confirmName"></span>」吗？<br>删除后不可恢复，图片也会一并移除。</p>
+      <div class="confirm-actions">
+        <button class="btn btn-cancel" id="btnNo">取消</button>
+        <button class="btn btn-danger" id="btnYes">确认删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出确认弹窗 -->
+  <div class="modal-mask hidden center" id="exportMask">
+    <div class="confirm-sheet">
+      <div class="confirm-icon"><span>⬇️</span></div>
+      <div class="confirm-title">导出备份</div>
+      <p class="confirm-text">确认导出当前所有数据（含全部图片）吗？</p>
+      <div class="export-status" id="exportStatus"></div>
+      <div class="confirm-actions">
+        <button class="btn btn-cancel" id="btnExportNo">取消</button>
+        <button class="btn btn-save" id="btnExportYes">导出</button>
+      </div>
+      <div class="export-done hidden" id="exportDoneWrap">
+        <button class="btn-export-done" id="btnExportDone">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 备份导入选择弹窗 -->
+  <div class="modal-mask hidden center" id="bakMask">
+    <div class="modal">
+      <div class="modal-header">
+        <span>导入备份</span>
+        <button class="icon-btn modal-close" id="bakClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="bak-empty hidden" id="bakEmpty">没有找到备份文件</div>
+        <div class="bak-list" id="bakList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 轻提示 -->
+  <div class="toast hidden" id="toast"></div>
+
+  <!-- 通用提示弹窗 -->
+  <div class="modal-mask hidden center" id="alertMask">
+    <div class="confirm-sheet">
+      <div class="confirm-title" id="alertTitle">提示</div>
+      <p class="confirm-text" id="alertText"></p>
+      <div class="confirm-actions">
+        <button class="btn btn-save" id="btnAlertOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 隐藏文件选择器: 用于导入备份json -->
+  <input type="file" id="importInput" accept=".json,.txt,application/json" hidden>
+
+  <!-- 详情独立滚动容器 -->
+  <div class="detail-view hidden" id="detailView"></div>
+
+  <!-- 全屏图片查看器(缩放/拖动/左右滑动切换, 点空白或按返回键关闭) -->
+  <div class="viewer-mask hidden" id="viewerMask">
+    <div class="viewer-stage" id="viewerStage">
+      <div class="viewer-track" id="viewerTrack">
+        <div class="viewer-cell"><img id="viewerImg" src="" alt=""></div>
+        <div class="viewer-cell"><img id="viewerImg2" src="" alt=""></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
