@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模型收藏 · JSON 数据查看器</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; padding: 20px; background: #f5f6fa; color: #1c2233; }
+  h1 { font-size: 20px; }
+  .drop { border: 2px dashed #c0c6d4; border-radius: 12px; padding: 30px; text-align: center; color: #6b7280; background: #fff; cursor: pointer; }
+  .drop:hover { border-color: #4a6cf7; }
+  .summary { margin: 16px 0; padding: 14px 16px; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); font-size: 14px; }
+  .summary b { color: #4a6cf7; }
+  h2 { font-size: 16px; margin: 20px 0 8px; }
+  .item { background: #fff; border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; font-size: 13px; word-break: break-all; box-shadow: 0 1px 4px rgba(0,0,0,0.04); }
+  .empty { color: #9aa3b2; }
+</style>
+</head>
+<body>
+  <h1>模型收藏 · JSON 数据查看器</h1>
+  <div class="drop" id="drop">点击选择 或 把 model_checker_*.json 拖到这里</div>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+  <div class="summary" id="summary">还没加载文件</div>
+  <div id="detail"></div>
+
+<script>
+  var drop = document.getElementById("drop");
+  var file = document.getElementById("file");
+  drop.addEventListener("click", function () { file.click(); });
+  drop.addEventListener("dragover", function (e) { e.preventDefault(); });
+  drop.addEventListener("drop", function (e) {
+    e.preventDefault();
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]);
+  });
+  file.addEventListener("change", function () {
+    if (file.files && file.files[0]) readFile(file.files[0]);
+  });
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function readFile(f) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        show(data);
+      } catch (e) {
+        alert("解析失败：" + e.message);
+      }
+    };
+    reader.readAsText(f);
+  }
+
+  function show(data) {
+    var list = data.list || [];
+    var plans = data.plans || [];
+    var shots = data.shots || [];
+    var images = data.images || {};
+    var imgCount = Object.keys(images).length;
+
+    document.getElementById("summary").innerHTML =
+      "物品(list)：<b>" + list.length + "</b> 条 &nbsp;|&nbsp; " +
+      "计划(plans)：<b>" + plans.length + "</b> 条 &nbsp;|&nbsp; " +
+      "随拍(shots)：<b>" + shots.length + "</b> 条 &nbsp;|&nbsp; " +
+      "图片(images)：<b>" + imgCount + "</b> 张";
+
+    var html = "";
+
+    html += "<h2>物品列表（" + list.length + "）</h2>";
+    if (list.length === 0) html += "<div class='empty'>无</div>";
+    list.forEach(function (it) {
+      var brand = (it.brand || []).join("/");
+      var kindLabel = it.kind === "bought" ? "已买" : (it.kind === "unreleased" ? "未发售" : "心愿");
+      var releaseInfo = "";
+      if (it.kind === "unreleased") {
+        if (it.releaseDate) releaseInfo += " ｜ 预计发售:" + esc(it.releaseDate);
+        if (it.releasePrice != null) releaseInfo += " ｜ 预计价格:" + it.releasePrice + (it.releasePriceUnit || "元");
+      }
+      html += "<div class='item'>" + esc(it.name) + " ｜ " + esc(kindLabel) +
+        " ｜ 品牌:" + esc(brand) + (it.price != null ? " ｜ 价格:¥" + it.price : "") + (it.date ? " ｜ 日期:" + esc(it.date) : "") + releaseInfo + "</div>";
+    });
+
+    html += "<h2>购买计划（" + plans.length + "）</h2>";
+    if (plans.length === 0) html += "<div class='empty'>无</div>";
+    plans.forEach(function (p) {
+      html += "<div class='item'>modelId: " + esc(p.modelId) + " ｜ 月份: " + esc(p.month) + " ｜ 预计金额: ¥" + (p.estPrice || 0) + "</div>";
+    });
+
+    html += "<h2>随拍（" + shots.length + "）</h2>";
+    if (shots.length === 0) html += "<div class='empty'>无</div>";
+    shots.forEach(function (s) {
+      html += "<div class='item'>图片: " + esc(s.image) + " ｜ tag: " + esc((s.tags || []).join(" / ")) + "</div>";
+    });
+
+    html += "<h2>图片文件（" + imgCount + "）</h2>";
+    if (imgCount === 0) html += "<div class='empty'>无</div>";
+    Object.keys(images).forEach(function (k) {
+      html += "<div class='item'>" + esc(k) + "（" + (images[k] ? images[k].length : 0) + " 字符）</div>";
+    });
+
+    document.getElementById("detail").innerHTML = html;
+  }
+</script>
+</body>
+</html>

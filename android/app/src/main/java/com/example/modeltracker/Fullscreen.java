@@ -55,6 +55,9 @@ public class Fullscreen extends Plugin {
             public void run() {
                 try {
                     Window window = getActivity().getWindow();
+                    // 状态栏/导航栏透明: 全屏切换时系统栏区域透出 WebView 黑底, 不闪时间电量/白边
+                    window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                    window.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
                     // 先让 WebView 铺满全屏（edge-to-edge），再隐藏系统栏，避免底部露白边
                     WindowCompat.setDecorFitsSystemWindows(window, false);
                     hideBars(window, true);
@@ -76,6 +79,9 @@ public class Fullscreen extends Plugin {
                     // 先恢复系统栏，再把 WebView 缩回系统栏之间，恢复普通页面布局
                     hideBars(window, false);
                     WindowCompat.setDecorFitsSystemWindows(window, true);
+                    // 恢复状态栏/导航栏默认色(深蓝状态栏 + 黑导航栏)
+                    window.setStatusBarColor(android.graphics.Color.parseColor("#1A3052"));
+                    window.setNavigationBarColor(android.graphics.Color.BLACK);
                     call.resolve();
                 } catch (Exception e) {
                     call.reject(e.getMessage());

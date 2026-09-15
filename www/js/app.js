@@ -36,7 +36,7 @@
   // ------------------------------------------------------------------
   // 数据
   // ------------------------------------------------------------------
-  var store = { list: [] };
+  var store = { list: [], plans: [], shots: [] };
   var imageCache = {};   // 图片 data URL 内存缓存(文件名 -> data URL)
 
   var $ = function (id) { return document.getElementById(id); };
@@ -44,23 +44,27 @@
     cardList: $("cardList"),
     emptyState: $("emptyState"),
     emptyText: $("emptyText"),
-    countAll: $("countAll"),
-    countBought: $("countBought"),
-    countWish: $("countWish"),
+    filterBought: $("filterBought"),
+    filterWish: $("filterWish"),
+    filterUnreleased: $("filterUnreleased"),
+    filterCountBought: $("filterCountBought"),
+    filterCountWish: $("filterCountWish"),
+    filterCountUnreleased: $("filterCountUnreleased"),
     searchWrap: $("searchWrap"),
     searchInput: $("searchInput"),
     searchScope: $("searchScope"),
     btnSearchSubmit: $("btnSearchSubmit"),
     searchSug: $("searchSug"),
     btnSearch: $("btnSearch"),
+    btnPlan: $("btnPlan"),
     btnEdit: $("btnEdit"),
     editMenu: $("editMenu"),
     btnSort: $("btnSort"),
     btnExitSort: $("btnExitSort"),
     btnExport: $("btnExport"),
     btnImport: $("btnImport"),
+    btnFilter: $("btnFilter"),
     sortSelect: $("sortSelect"),
-    tabs: document.querySelectorAll(".tab"),
     modalMask: $("modalMask"),
     modalTitle: $("modalTitle"),
     btnModalClose: $("btnModalClose"),
@@ -70,10 +74,16 @@
     brandChips: $("brandChips"),
     kindBought: $("kindBought"),
     kindWish: $("kindWish"),
+    kindUnreleased: $("kindUnreleased"),
     priceGroup: $("priceGroup"),
     inpPrice: $("inpPrice"),
     dateGroup: $("dateGroup"),
     inpDate: $("inpDate"),
+    releaseDateGroup: $("releaseDateGroup"),
+    releasePriceGroup: $("releasePriceGroup"),
+    inpReleaseDate: $("inpReleaseDate"),
+    inpReleasePrice: $("inpReleasePrice"),
+    inpReleasePriceUnit: $("inpReleasePriceUnit"),
     imgGrid: $("imgGrid"),
     imgCount: $("imgCount"),
     inpTag: $("inpTag"),
@@ -105,20 +115,60 @@
     viewerImg2: $("viewerImg2"),
     viewerTrack: $("viewerTrack"),
     detailView: $("detailView"),
+    planView: $("planView"),
+    planModal: $("planModal"),
+    btnPlanModalClose: $("btnPlanModalClose"),
+    planMonthTrigger: $("planMonthTrigger"),
+    planMonthLabel: $("planMonthLabel"),
+    planMonthDropdown: $("planMonthDropdown"),
+    planSearch: $("planSearch"),
+    planModelList: $("planModelList"),
+    planPrice: $("planPrice"),
+    btnPlanCancel: $("btnPlanCancel"),
+    btnPlanSave: $("btnPlanSave"),
+    btnShot: $("btnShot"),
+    shotView: $("shotView"),
+    shotModal: $("shotModal"),
+    shotModalTitle: $("shotModalTitle"),
+    btnShotModalClose: $("btnShotModalClose"),
+    shotImgPreview: $("shotImgPreview"),
+    btnShotPickImg: $("btnShotPickImg"),
+    shotFileInput: $("shotFileInput"),
+    shotDesc: $("shotDesc"),
+    shotTagInput: $("shotTagInput"),
+    btnShotAddTag: $("btnShotAddTag"),
+    shotTagChips: $("shotTagChips"),
+    btnShotCancel: $("btnShotCancel"),
+    btnShotSave: $("btnShotSave"),
+    btnShotDelete: $("btnShotDelete"),
+    viewerActions: $("viewerActions"),
+    btnViewerDesc: $("btnViewerDesc"),
+    btnViewerEdit: $("btnViewerEdit"),
     toast: $("toast"),
     alertMask: $("alertMask"),
     alertTitle: $("alertTitle"),
     alertText: $("alertText"),
-    btnAlertOk: $("btnAlertOk")
+    btnAlertOk: $("btnAlertOk"),
+    importMask: $("importMask"),
+    importTitle: $("importTitle"),
+    importText: $("importText"),
+    btnImportDone: $("btnImportDone"),
+    filterMask: $("filterMask"),
+    btnFilterOk: $("btnFilterOk"),
+    btnFilterCancel: $("btnFilterCancel")
   };
 
-  var currentFilter = "all";
+  var activeFilters = new Set(["bought", "wish", "unreleased"]);
   var editingId = null;           // null=新增
   var pendingImages = [];         // 当前弹窗中待保存的图片 [{name(已存文件名)|null, base64|null}]
   var pendingTags = [];           // 当前弹窗中待保存的自定义标签
   var pendingBrands = [];         // 当前弹窗中待保存的品牌/厂商(多个)
   var deletingId = null;
+  var deletingPlanId = null;       // 待删除的购买计划 id
+  var deletingShotId = null;       // 待删除的随拍 id
+  var saveImagePending = false;    // 长按大图待保存图片
   var viewingId = null;           // 当前查看详情中的 id
+  var fromPlanView = false;       // 是否从购买计划页进入详情(返回时回计划页)
   var savedListScroll = 0;        // 进入详情前记录的列表滚动位置
   var savedSearchVisible = false; // 进入详情前搜索栏是否展开
 
@@ -145,14 +195,50 @@
     ui.alertTitle.textContent = title || "提示";
     ui.alertMask.classList.remove("hidden");
   }
+
+  // ---- 导入等待弹窗 ----
+  function showImportSelecting() {
+    if (!ui.importMask) return;
+    if (ui.importTitle) ui.importTitle.textContent = "导入";
+    if (ui.importText) ui.importText.textContent = "请选择备份文件…";
+    if (ui.btnImportDone) { ui.btnImportDone.disabled = true; ui.btnImportDone.textContent = "请选择文件"; }
+    ui.importMask.classList.remove("hidden");
+  }
+  function showImportWaiting() {
+    if (!ui.importMask) return;
+    if (ui.importTitle) ui.importTitle.textContent = "正在导入";
+    if (ui.importText) ui.importText.textContent = "正在恢复数据，请稍候…";
+    if (ui.btnImportDone) { ui.btnImportDone.disabled = true; ui.btnImportDone.textContent = "导入中…"; }
+    ui.importMask.classList.remove("hidden");
+  }
+  function showImportDone(cnt) {
+    if (!ui.importMask) return;
+    if (ui.importTitle) ui.importTitle.textContent = "导入完成";
+    if (ui.importText) ui.importText.textContent = "已恢复 " + cnt + " 条记录";
+    if (ui.btnImportDone) { ui.btnImportDone.disabled = false; ui.btnImportDone.textContent = "完成"; }
+  }
+  function showImportFail(msg) {
+    if (!ui.importMask) return;
+    if (ui.importTitle) ui.importTitle.textContent = "导入失败";
+    if (ui.importText) ui.importText.textContent = msg || "导入失败";
+    if (ui.btnImportDone) { ui.btnImportDone.disabled = false; ui.btnImportDone.textContent = "关闭"; }
+  }
+  function closeImportMask() {
+    if (ui.importMask) ui.importMask.classList.add("hidden");
+  }
   function getKind() {
-    return ui.kindBought.classList.contains("active") ? "bought" : "wish";
+    if (ui.kindBought.classList.contains("active")) return "bought";
+    if (ui.kindUnreleased.classList.contains("active")) return "unreleased";
+    return "wish";
   }
   function setKind(kind) {
     ui.kindBought.classList.toggle("active", kind === "bought");
     ui.kindWish.classList.toggle("active", kind === "wish");
+    ui.kindUnreleased.classList.toggle("active", kind === "unreleased");
     ui.priceGroup.classList.toggle("hidden", kind !== "bought");
     ui.dateGroup.classList.toggle("hidden", kind !== "bought");
+    if (ui.releaseDateGroup) ui.releaseDateGroup.classList.toggle("hidden", kind !== "unreleased");
+    if (ui.releasePriceGroup) ui.releasePriceGroup.classList.toggle("hidden", kind !== "unreleased");
   }
 
   // ------------------------------------------------------------------
@@ -163,34 +249,35 @@
       if (!isNative) {
         try {
           var raw = localStorage.getItem("model_tracker_data");
-          if (raw) store.list = JSON.parse(raw);
+          if (raw) loadStoreData(JSON.parse(raw));
         } catch (e) {}
         return;
       }
       await this.ensureImageDir();
       try {
         var r = await Filesystem.readFile({ path: "data.json", directory: DATA_DIR, encoding: "utf8" });
-        var list = JSON.parse(r.data);
         // 归一化任意版本的数据, 保证兼容
-        store.list = normalizeList(list);
+        loadStoreData(JSON.parse(r.data));
       } catch (e) {
         store.list = [];
+        store.plans = [];
       }
     },
 
     async save() {
+      var payload = { list: store.list, plans: store.plans, shots: store.shots };
       if (!isNative) {
-        try { localStorage.setItem("model_tracker_data", JSON.stringify(store.list)); } catch (e) {}
+        try { localStorage.setItem("model_tracker_data", JSON.stringify(payload)); } catch (e) {}
         return;
       }
       try {
         await Filesystem.writeFile({
-          path: "data.json", directory: DATA_DIR, data: JSON.stringify(store.list), encoding: "utf8", recursive: true
+          path: "data.json", directory: DATA_DIR, data: JSON.stringify(payload), encoding: "utf8", recursive: true
         });
       } catch (e) {
         try {
           await Filesystem.writeFile({
-            path: "data.json", directory: DATA_DIR, data: JSON.stringify(store.list), encoding: "utf8"
+            path: "data.json", directory: DATA_DIR, data: JSON.stringify(payload), encoding: "utf8"
           });
         } catch (e2) { console.error("save data failed", e2); }
       }
@@ -219,7 +306,7 @@
           if (cb === pure) {
             // 数据完整: 生成小缩略图, 加速列表/启动加载
             try {
-              var thumb = await tryToJpeg(dataUrl, 128, 0.7);
+              var thumb = await tryToJpeg(dataUrl, 320, 0.8);
               if (thumb) {
                 var thumbPure = thumb.indexOf(",") >= 0 ? thumb.split(",")[1] : thumb;
                 var thumbName = name.replace(/\.[^.]+$/, "") + "_thumb.jpg";
@@ -372,15 +459,17 @@
       var backup = JSON.parse(json);
       if (!backup || !backup.list) throw new Error("bad backup");
 
-      // 恢复图片文件
+      // 恢复图片文件(分批并行写, 大幅加速)
       var imgNames = Object.keys(backup.images || {});
-      for (var i = 0; i < imgNames.length; i++) {
-        try {
-          await Filesystem.writeFile({ path: "images/" + imgNames[i], directory: DATA_DIR, data: backup.images[imgNames[i]] });
-        } catch (e) {}
+      var BATCH = 10;
+      for (var b = 0; b < imgNames.length; b += BATCH) {
+        var batch = imgNames.slice(b, b + BATCH);
+        await Promise.all(batch.map(function (name) {
+          return Filesystem.writeFile({ path: "images/" + name, directory: DATA_DIR, data: backup.images[name] }).catch(function () {});
+        }));
       }
-      // 恢复记录
-      store.list = normalizeList(backup.list);
+      // 恢复记录(物品 + 计划 + 随拍)
+      loadStoreData(backup);
       await this.save();
       return store.list.length;
     }
@@ -402,9 +491,12 @@
         id: it.id || genId(),
         name: typeof it.name === "string" ? it.name : "",
         brand: normalizeBrands(it.brand),
-        kind: it.kind === "bought" ? "bought" : "wish",
+        kind: (it.kind === "bought" || it.kind === "unreleased") ? it.kind : "wish",
         price: (it.kind === "bought" && it.price != null) ? it.price : null,
         date: typeof it.date === "string" ? it.date : "",
+        releaseDate: typeof it.releaseDate === "string" ? it.releaseDate : "",
+        releasePrice: (typeof it.releasePrice === "number" && isFinite(it.releasePrice)) ? it.releasePrice : null,
+        releasePriceUnit: (it.releasePriceUnit === "元" || it.releasePriceUnit === "美元" || it.releasePriceUnit === "日元") ? it.releasePriceUnit : "元",
         images: Array.isArray(it.images) ? it.images : [],
         tags: Array.isArray(it.tags) ? it.tags.filter(function (t) { return typeof t === "string" && t.length > 0; }) : [],
         createdAt: it.createdAt || 0,
@@ -414,6 +506,52 @@
       r.images = r.images.filter(function (x) { return typeof x === "string" && x.length > 0; });
       return r;
     }).filter(Boolean);
+  }
+
+  // 归一化购买计划数据
+  function normalizePlans(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(function (it) {
+      if (!it || typeof it !== "object") return null;
+      return {
+        id: it.id || genId(),
+        modelId: typeof it.modelId === "string" ? it.modelId : "",
+        month: typeof it.month === "string" ? it.month : "",
+        estPrice: (typeof it.estPrice === "number" && isFinite(it.estPrice)) ? it.estPrice : null
+      };
+    }).filter(function (p) { return p.modelId && p.month; });
+  }
+
+  // 归一化随拍数据
+  function normalizeShots(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map(function (it) {
+      if (!it || typeof it !== "object") return null;
+      return {
+        id: it.id || genId(),
+        image: typeof it.image === "string" ? it.image : "",
+        desc: typeof it.desc === "string" ? it.desc : "",
+        tags: Array.isArray(it.tags) ? it.tags.filter(function (t) { return typeof t === "string" && t.length > 0; }) : [],
+        createdAt: it.createdAt || 0
+      };
+    }).filter(function (s) { return s.image && s.tags.length > 0; });
+  }
+
+  // 从任意版本的数据加载 list + plans + shots(兼容旧数组格式)
+  function loadStoreData(data) {
+    if (Array.isArray(data)) {
+      store.list = normalizeList(data);
+      store.plans = [];
+      store.shots = [];
+    } else if (data && typeof data === "object") {
+      store.list = normalizeList(data.list);
+      store.plans = normalizePlans(data.plans);
+      store.shots = normalizeShots(data.shots);
+    } else {
+      store.list = [];
+      store.plans = [];
+      store.shots = [];
+    }
   }
 
   // 生成备份文件名: model_checker_年-月-日_时-分-秒.json
@@ -604,11 +742,16 @@
     return (b.createdAt || 0) - (a.createdAt || 0);
   }
 
+  // 当前筛选是否恰好只选了"已购买"(此时才显示排序控件)
+  function onlyBoughtFilter() {
+    return activeFilters.size === 1 && activeFilters.has("bought");
+  }
+
   function sortRecords(arr) {
     // 已买: 按用户选择的排序(时间/价格); 全部/未买: 按添加时间(新→旧)
-    var s = currentFilter === "bought" ? getSort() : "time";
+    var s = onlyBoughtFilter() ? getSort() : "time";
     return arr.slice().sort(function (a, b) {
-      if (currentFilter === "bought") {
+      if (onlyBoughtFilter()) {
         if (s === "priceAsc" || s === "priceDesc") {
           var pa = (a.price != null && a.price !== "") ? parseFloat(a.price) : Infinity;
           var pb = (b.price != null && b.price !== "") ? parseFloat(b.price) : Infinity;
@@ -636,6 +779,7 @@
   var sortMode = false;
   var sortItems = [];
   var sortPrevSearchVisible = false;
+  var sortPrevFilters = ["bought", "wish", "unreleased"];
   var dragState = { active: false, id: null, el: null, startY: 0, clientY: 0, fromIndex: 0, targetIndex: 0, step: 0, grabOffset: 0, startTop: 0, scrollComp: 0, autoScrollDir: 0, autoScrolling: false, longPressTimer: null, debounceTimer: null };
   var shiftMap = {};
 
@@ -650,8 +794,8 @@
     var tb = document.getElementById("toolbar");
     if (sw) sw.classList.add("hidden");
     if (tb) tb.classList.add("hidden");
-    currentFilter = "all";
-    ui.tabs.forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-filter") === "all"); });
+    sortPrevFilters = Array.from(activeFilters);   // 记录原筛选, 退出排序时恢复
+    activeFilters = new Set(["bought", "wish", "unreleased"]);
     renderList();
     refreshTopBar();
   }
@@ -666,6 +810,9 @@
     if (tb) tb.classList.remove("hidden");
     var sw = document.getElementById("searchWrap");
     if (sw) sw.classList.toggle("hidden", !sortPrevSearchVisible);
+    // 恢复进入排序前的筛选
+    activeFilters = new Set(sortPrevFilters && sortPrevFilters.length ? sortPrevFilters : ["bought", "wish", "unreleased"]);
+    updateSortVisibility();
     renderList();
     refreshTopBar();
     storage.save();
@@ -877,10 +1024,10 @@
     storage.save();
   }
 
-  // 按当前筛选更新排序控件的显隐（仅"已买"Tab显示排序）
+  // 按当前筛选更新排序控件的显隐（仅"已购买"单独选中时显示排序）
   function updateSortVisibility() {
     var sw = document.getElementById("sortWrap");
-    if (sw) sw.classList.toggle("hidden", currentFilter !== "bought");
+    if (sw) sw.classList.toggle("hidden", !onlyBoughtFilter());
     refreshTopBar();
   }
 
@@ -890,7 +1037,7 @@
     try {
       var st = {
         scope: ui.searchScope ? ui.searchScope.value : "all",
-        filter: currentFilter,
+        filters: Array.from(activeFilters),
         sort: ui.sortSelect ? ui.sortSelect.value : "time"
       };
       localStorage.setItem(UI_STATE_KEY, JSON.stringify(st));
@@ -903,9 +1050,9 @@
       var st = JSON.parse(raw);
       // scope 不恢复, 冷启动默认回到"全部", 避免按"名称"搜索时搜不到品牌/标签
       if (st.sort && ui.sortSelect) ui.sortSelect.value = st.sort;
-      if (st.filter === "all" || st.filter === "bought" || st.filter === "wish") {
-        currentFilter = st.filter;
-        ui.tabs.forEach(function (t) { t.classList.toggle("active", t.getAttribute("data-filter") === st.filter); });
+      if (Array.isArray(st.filters) && st.filters.length) {
+        var valid = st.filters.filter(function (f) { return f === "bought" || f === "wish" || f === "unreleased"; });
+        if (valid.length) activeFilters = new Set(valid);
       }
     } catch (e) {}
   }
@@ -917,7 +1064,7 @@
     var kw = ui.searchInput.value.trim().toLowerCase();
     var scope = ui.searchScope ? ui.searchScope.value : "all";
     return store.list.filter(function (it) {
-      var ok = currentFilter === "all" || it.kind === currentFilter;
+      var ok = activeFilters.has(it.kind);
       if (!ok) return false;
       if (kw) {
         var nameHit = (it.name || "").toLowerCase().indexOf(kw) >= 0;
@@ -988,9 +1135,36 @@
   function updateCounts() {
     var b = store.list.filter(function (i) { return i.kind === "bought"; }).length;
     var w = store.list.filter(function (i) { return i.kind === "wish"; }).length;
-    ui.countAll.textContent = store.list.length;
-    ui.countBought.textContent = b;
-    ui.countWish.textContent = w;
+    var u = store.list.filter(function (i) { return i.kind === "unreleased"; }).length;
+    if (ui.filterCountBought) ui.filterCountBought.textContent = b;
+    if (ui.filterCountWish) ui.filterCountWish.textContent = w;
+    if (ui.filterCountUnreleased) ui.filterCountUnreleased.textContent = u;
+  }
+
+  // 筛选弹窗: 多选状态过滤
+  function openFilter() {
+    if (ui.editMenu) ui.editMenu.classList.add("hidden");
+    updateCounts();
+    if (ui.filterBought) ui.filterBought.checked = activeFilters.has("bought");
+    if (ui.filterWish) ui.filterWish.checked = activeFilters.has("wish");
+    if (ui.filterUnreleased) ui.filterUnreleased.checked = activeFilters.has("unreleased");
+    ui.filterMask.classList.remove("hidden");
+  }
+  function closeFilter() {
+    ui.filterMask.classList.add("hidden");
+  }
+  function applyFilter() {
+    var next = new Set();
+    if (ui.filterBought && ui.filterBought.checked) next.add("bought");
+    if (ui.filterWish && ui.filterWish.checked) next.add("wish");
+    if (ui.filterUnreleased && ui.filterUnreleased.checked) next.add("unreleased");
+    if (next.size === 0) { showAlert("请至少选择一种状态"); return; }
+    activeFilters = next;
+    saveUiState();
+    closeFilter();
+    updateSortVisibility();
+    renderList();
+    window.scrollTo(0, 0);
   }
 
   function renderList() {
@@ -1003,8 +1177,6 @@
     if (items.length === 0) {
       ui.emptyState.classList.remove("hidden");
       if (store.list.length === 0) ui.emptyText.textContent = "还没有记录，点下方 ＋ 添加第一个模型吧";
-      else if (currentFilter === "bought") ui.emptyText.textContent = "已买列表为空";
-      else if (currentFilter === "wish") ui.emptyText.textContent = "未买(心愿单)列表为空";
       else ui.emptyText.textContent = "没有找到匹配的记录";
       return;
     }
@@ -1021,7 +1193,9 @@
         ? '<div class="card-thumb"><img data-idx="0" alt="" onerror="this.onerror=null;this.src=window.IMG_FALLBACK;"></div>'
         : '<div class="card-thumb">📦</div>';
 
-      var badge = it.kind === "bought" ? '<span class="badge bought">已买</span>' : '<span class="badge wish">心愿</span>';
+      var badge = it.kind === "bought" ? '<span class="badge bought">已买</span>'
+        : (it.kind === "unreleased" ? '<span class="badge unreleased">未发售</span>'
+        : '<span class="badge wish">心愿</span>');
 
       var meta = '';
       if (it.kind === "bought") {
@@ -1033,6 +1207,8 @@
 
       var brandHtml = (it.brand && it.brand.length)
         ? '<div class="card-brand">' + esc(it.brand.join("/")) + '</div>' : '';
+      var releaseHtml = (it.kind === "unreleased" && it.releaseDate)
+        ? '<div class="card-release">预计' + esc(it.releaseDate) + '发售</div>' : '';
 
       var metaHtml = meta
         ? '<div class="card-meta">' + meta + '</div>' : '';
@@ -1041,6 +1217,7 @@
         '<div class="card-info">' +
           '<div class="card-name">' + esc(it.name) + '</div>' +
           brandHtml +
+          releaseHtml +
           metaHtml +
         '</div>' +
         '<span class="card-status">' + badge + '</span>';
@@ -1086,17 +1263,28 @@
 
   // 从详情返回列表, 并恢复到进入详情前的滚动位置(保留词条位置)
   function goBackToList() {
+    var backToPlan = fromPlanView;
+    fromPlanView = false;
     viewingId = null;
     // 隐藏并清空详情容器
     if (ui.detailView) {
       ui.detailView.classList.add("hidden");
       ui.detailView.innerHTML = "";
     }
+    if (backToPlan) {
+      // 从计划页进详情: 返回计划页(保持滚动锁定)
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+      ui.planView.classList.remove("hidden");
+      renderPlan();
+      return;
+    }
     // 恢复 window 滚动(详情已独立滚动, 不会污染列表滚动位置)
     document.documentElement.style.overflow = "";
     document.body.style.overflow = "";
     exitDetailView();
-    // 列表 DOM 在详情期间保留, 直接恢复到进入详情前的滚动位置
+    // 刷新卡片状态(编辑后返回需反映最新状态), 但保持进入详情前的滚动位置不变
+    renderList();
     var target = savedListScroll || 0;
     window.scrollTo(0, target);
     document.documentElement.scrollTop = target;
@@ -1106,6 +1294,709 @@
       document.documentElement.scrollTop = target;
       document.body.scrollTop = target;
     });
+  }
+
+  // ==================================================================
+  // 购买计划（月度）
+  // ==================================================================
+
+  function currentMonth() {
+    var d = new Date();
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
+  }
+
+  function monthLabel(m) {
+    var parts = String(m).split("-");
+    if (parts.length !== 2) return m;
+    return parseInt(parts[0], 10) + "年" + parseInt(parts[1], 10) + "月";
+  }
+
+  // 金额四舍五入到分, 消除浮点误差(如 0.1+0.2=0.30000000000000004)
+  function formatMoney(x) {
+    return Math.round((parseFloat(x) || 0) * 100) / 100;
+  }
+
+  // 已买总消费(长按标题统计用)
+  function totalSpent() {
+    var sum = 0;
+    store.list.forEach(function (m) {
+      if (m.kind === "bought" && m.price != null && m.price !== "") {
+        sum += parseFloat(m.price) || 0;
+      }
+    });
+    return sum;
+  }
+
+  // 计划引用的模型: 存在且未买(未买/未发售)才返回(已买/已删返回 null, 显示时过滤)
+  function planModel(p) {
+    var m = store.list.find(function (x) { return x.id === p.modelId; });
+    if (!m || m.kind === "bought") return null;
+    return m;
+  }
+
+  // 可见计划: 月份 >= 当前月 且 模型存在未买
+  function visiblePlans() {
+    var cm = currentMonth();
+    return store.plans.filter(function (p) {
+      if (!p.month || p.month < cm) return false;
+      return !!planModel(p);
+    });
+  }
+
+  // 组装计划页显示条目: 心愿计划(预计金额) + 已购模型(购买金额, 按购买日期月份自动拉入)
+  function planDisplayItems() {
+    var cm = currentMonth();
+    var items = [];
+    store.plans.forEach(function (p) {
+      var m = planModel(p);
+      if (!m || !p.month || p.month < cm) return;
+      items.push({
+        month: p.month,
+        type: "plan",
+        planId: p.id,
+        modelId: p.modelId,
+        amount: p.estPrice || 0,
+        label: "预计金额",
+        model: m
+      });
+    });
+    store.list.forEach(function (m) {
+      if (m.kind !== "bought") return;
+      var mo = (m.date || "").slice(0, 7);
+      if (!mo || mo < cm) return;
+      items.push({
+        month: mo,
+        type: "bought",
+        modelId: m.id,
+        amount: m.price != null ? m.price : 0,
+        label: "购买金额",
+        model: m
+      });
+    });
+    return items;
+  }
+
+  function renderPlan() {
+    var dv = ui.planView;
+    if (!dv) return;
+    dv.innerHTML = "";
+
+    var items = planDisplayItems();
+    var cm = currentMonth();
+    var monthSum = 0;
+    items.forEach(function (it) { if (it.month === cm && it.type === "bought") monthSum += it.amount || 0; });
+
+    var top = document.createElement("div");
+    top.className = "plan-topbar";
+    var back = document.createElement("button");
+    back.className = "plan-back";
+    back.textContent = "‹";
+    back.addEventListener("click", exitPlan);
+    var title = document.createElement("span");
+    title.className = "plan-title";
+    title.textContent = "购买计划";
+    top.appendChild(back);
+    top.appendChild(title);
+    var monthTotal = document.createElement("span");
+    monthTotal.className = "plan-month-total";
+    monthTotal.textContent = "本月花费 ¥" + formatMoney(monthSum);
+    top.appendChild(monthTotal);
+    dv.appendChild(top);
+
+    if (items.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "plan-empty";
+      empty.textContent = "还没有购买计划，点右下角「＋」添加";
+      dv.appendChild(empty);
+    } else {
+      var groups = {};
+      items.forEach(function (it) {
+        if (!groups[it.month]) groups[it.month] = [];
+        groups[it.month].push(it);
+      });
+      Object.keys(groups).sort().forEach(function (m) {
+        var list = groups[m];
+        // 每月内排序: 金额小→大, 同金额时间旧→新
+        list.sort(function (a, b) {
+          var da = formatMoney(a.amount), db = formatMoney(b.amount);
+          if (da !== db) return da - db;
+          return (a.model ? a.model.createdAt || 0 : 0) - (b.model ? b.model.createdAt || 0 : 0);
+        });
+        var total = list.reduce(function (s, it) { return s + (it.amount || 0); }, 0);
+        var box = document.createElement("div");
+        box.className = "plan-month";
+        var head = document.createElement("div");
+        head.className = "plan-month-head";
+        var nm = document.createElement("span");
+        nm.className = "plan-month-name";
+        nm.textContent = monthLabel(m);
+        var tt = document.createElement("span");
+        tt.className = "plan-month-total";
+        tt.textContent = "合计 ¥" + formatMoney(total);
+        head.appendChild(nm);
+        head.appendChild(tt);
+        box.appendChild(head);
+        list.forEach(function (it) {
+          var model = it.model;
+          var row = document.createElement("div");
+          row.className = "plan-item";
+          row.addEventListener("click", function (e) {
+            if (e.target.classList && e.target.classList.contains("plan-item-del")) return;
+            fromPlanView = true;
+            openDetail(it.modelId, false);
+          });
+          // 缩略图
+          var th = document.createElement("img");
+          th.className = "plan-item-thumb";
+          var fn = model && model.images && model.images[0];
+          if (fn) storage.thumbUrl(fn).then(function (u) { if (u) th.src = u; });
+          row.appendChild(th);
+          // 名字 + brand + 金额(三行)
+          var info = document.createElement("div");
+          info.className = "plan-item-info";
+          var rn = document.createElement("div");
+          rn.className = "plan-item-name";
+          rn.textContent = model ? model.name : "";
+          info.appendChild(rn);
+          if (model && model.brand && model.brand.length) {
+            var rb = document.createElement("div");
+            rb.className = "plan-item-brand";
+            rb.textContent = model.brand.join(" / ");
+            info.appendChild(rb);
+          }
+          var ra = document.createElement("div");
+          ra.className = "plan-item-amount" + (it.type === "bought" ? " bought" : "");
+          ra.textContent = it.label + " ¥" + formatMoney(it.amount);
+          info.appendChild(ra);
+          row.appendChild(info);
+          // 删除按钮(仅心愿计划, 已购自动拉入不能删)
+          if (it.type === "plan") {
+            var rd = document.createElement("button");
+            rd.className = "plan-item-del";
+            rd.textContent = "删除";
+            rd.addEventListener("click", function () { confirmDeletePlan(it.planId); });
+            row.appendChild(rd);
+          }
+          box.appendChild(row);
+        });
+        dv.appendChild(box);
+      });
+    }
+
+    var fab = document.createElement("button");
+    fab.className = "plan-fab";
+    fab.textContent = "＋";
+    fab.addEventListener("click", openAddPlan);
+    dv.appendChild(fab);
+  }
+
+  function enterPlan() {
+    if (viewingId) goBackToList();
+    // 清理过期计划: month 已过的自动取消(删除)
+    var cm = currentMonth();
+    var before = store.plans.length;
+    store.plans = store.plans.filter(function (p) { return p.month >= cm; });
+    if (store.plans.length !== before) storage.save();
+    var tb = document.getElementById("toolbar");
+    var sw = document.getElementById("searchWrap");
+    var fab = document.getElementById("btnAdd");
+    if (tb) tb.classList.add("hidden");
+    if (sw) sw.classList.add("hidden");
+    if (fab) fab.classList.add("hidden");
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    ui.planView.classList.remove("hidden");
+    renderPlan();
+    ui.planView.scrollTop = 0;   // 进入计划置顶
+  }
+
+  function exitPlan() {
+    ui.planView.classList.add("hidden");
+    ui.planView.innerHTML = "";
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
+    exitDetailView();
+    renderList();
+    refreshTopBar();
+  }
+
+  // ---- 添加计划弹窗 ----
+  var planSelectedModelId = null;
+  var planSelectedMonth = null;
+
+  function openAddPlan() {
+    planSelectedModelId = null;
+    planSelectedMonth = currentMonth();   // 默认选本月
+    // 月份下拉: 当前月起到往后 18 个月(含年份)
+    var dd = ui.planMonthDropdown;
+    if (dd) {
+      dd.innerHTML = "";
+      var now = new Date();
+      for (var i = 0; i < 18; i++) {
+        var d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        var val = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
+        (function (val) {
+          var opt = document.createElement("div");
+          opt.className = "plan-month-option";
+          opt.textContent = monthLabel(val);
+          if (val === planSelectedMonth) opt.classList.add("selected");
+          opt.addEventListener("click", function () { selectPlanMonth(val); });
+          dd.appendChild(opt);
+        })(val);
+      }
+      dd.classList.add("hidden");
+    }
+    if (ui.planMonthLabel) ui.planMonthLabel.textContent = monthLabel(planSelectedMonth);
+    if (ui.planSearch) ui.planSearch.value = "";
+    renderPlanModels();
+    ui.planPrice.value = "";
+    ui.planModal.classList.remove("hidden");
+  }
+
+  function closeAddPlan() {
+    ui.planModal.classList.add("hidden");
+  }
+
+  function togglePlanMonth() {
+    var dd = ui.planMonthDropdown;
+    if (dd) dd.classList.toggle("hidden");
+  }
+
+  function selectPlanMonth(val) {
+    planSelectedMonth = val;
+    if (ui.planMonthLabel) ui.planMonthLabel.textContent = monthLabel(val);
+    var dd = ui.planMonthDropdown;
+    if (dd) {
+      dd.classList.add("hidden");
+      dd.querySelectorAll(".plan-month-option").forEach(function (o) {
+        o.classList.toggle("selected", o.textContent === monthLabel(val));
+      });
+    }
+  }
+
+  // 可选模型: 心愿(未买) 且 还没在计划里出现(最多一次)
+  function renderPlanModels() {
+    var box = ui.planModelList;
+    if (!box) return;
+    box.innerHTML = "";
+    var used = {};
+    store.plans.forEach(function (p) { used[p.modelId] = true; });
+    var kw = (ui.planSearch ? ui.planSearch.value : "").trim().toLowerCase();
+    var candidates = store.list.filter(function (m) {
+      if (m.kind === "bought" || used[m.id]) return false;
+      if (kw) {
+        var nameHit = (m.name || "").toLowerCase().indexOf(kw) >= 0;
+        var brandHit = (m.brand || []).some(function (b) { return String(b).toLowerCase().indexOf(kw) >= 0; });
+        if (!nameHit && !brandHit) return false;
+      }
+      return true;
+    });
+    if (candidates.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "plan-model-opt";
+      var en = document.createElement("span");
+      en.className = "plan-model-opt-name";
+      en.textContent = kw ? "没有匹配的模型" : "没有可选的心愿模型";
+      empty.appendChild(en);
+      box.appendChild(empty);
+      return;
+    }
+    candidates.forEach(function (m) {
+      var opt = document.createElement("div");
+      opt.className = "plan-model-opt";
+      if (m.id === planSelectedModelId) opt.classList.add("selected");
+      // 缩略图
+      var th = document.createElement("img");
+      th.className = "plan-model-thumb";
+      var fn = m.images && m.images[0];
+      if (fn) storage.thumbUrl(fn).then(function (u) { if (u) th.src = u; });
+      opt.appendChild(th);
+      // 名字 + 品牌
+      var info = document.createElement("div");
+      info.className = "plan-model-info";
+      var nm = document.createElement("div");
+      nm.className = "plan-model-opt-name";
+      nm.textContent = m.name;
+      info.appendChild(nm);
+      if (m.brand && m.brand.length) {
+        var br = document.createElement("div");
+        br.className = "plan-model-opt-brand";
+        br.textContent = m.brand.join(" / ");
+        info.appendChild(br);
+      }
+      opt.appendChild(info);
+      opt.addEventListener("click", function () {
+        planSelectedModelId = m.id;
+        box.querySelectorAll(".plan-model-opt").forEach(function (o) { o.classList.remove("selected"); });
+        opt.classList.add("selected");
+      });
+      box.appendChild(opt);
+    });
+  }
+
+  function savePlan() {
+    if (!planSelectedModelId) { showAlert("请选择一个模型"); return; }
+    var month = planSelectedMonth;
+    if (!month) { showAlert("请选择月份"); return; }
+    var price = parseFloat((ui.planPrice ? ui.planPrice.value : "").trim());
+    if (isNaN(price) || price < 0) { showAlert("请填写预计金额"); return; }
+    if (store.plans.some(function (p) { return p.modelId === planSelectedModelId; })) {
+      showAlert("该模型已在购买计划里"); return;
+    }
+    store.plans.push({
+      id: genId(),
+      modelId: planSelectedModelId,
+      month: month,
+      estPrice: price
+    });
+    storage.save().then(function () {
+      closeAddPlan();
+      renderPlan();
+    });
+  }
+
+  function confirmDeletePlan(id) {
+    var p = store.plans.find(function (x) { return x.id === id; });
+    if (!p) return;
+    var model = planModel(p);
+    deletingPlanId = id;
+    ui.confirmName.textContent = model ? model.name : "";
+    var titleEl = document.querySelector("#confirmMask .confirm-title");
+    var textEl = document.querySelector("#confirmMask .confirm-text");
+    if (titleEl) titleEl.textContent = "删除购买计划";
+    if (textEl) textEl.textContent = "确定要删除这个购买计划吗？";
+    resetConfirmDeleteBtn();
+    ui.confirmMask.classList.remove("hidden");
+  }
+
+  async function doDeletePlan() {
+    store.plans = store.plans.filter(function (p) { return p.id !== deletingPlanId; });
+    deletingPlanId = null;
+    await storage.save();
+    ui.confirmMask.classList.add("hidden");
+    renderPlan();
+    toast("已删除");
+  }
+
+  // ==================================================================
+  // 随拍（相册）
+  // ==================================================================
+  var shotTags = [];             // 弹窗中待保存的标签
+  var shotDataUrl = null;        // 弹窗中待保存的图片 data URL(新图)
+  var shotFileName = null;       // 弹窗中图片文件名(已保存/编辑沿用)
+  var editingShotId = null;      // 编辑中的随拍 id
+  var viewerShotMode = false;    // 查看器是否随拍模式
+  var shotViewerShots = [];      // 随拍大图对应的 shots(过滤后)
+  var shotViewerOpening = false; // 随拍大图打开防重入(连续点击只认最后一次)
+
+  // 过滤后的随拍(按搜索关键词, 新→旧)
+  function filteredShots() {
+    var kw = "";
+    var inp = document.querySelector("#shotView .shot-search");
+    if (inp) kw = inp.value.trim().toLowerCase();
+    var list = store.shots.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
+    if (kw) {
+      list = list.filter(function (s) {
+        return (s.tags || []).some(function (t) { return String(t).toLowerCase().indexOf(kw) >= 0; });
+      });
+    }
+    return list;
+  }
+
+  function renderShotGrid() {
+    var wrap = document.getElementById("shotGridWrap");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    var shots = filteredShots();
+    if (shots.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "shot-empty";
+      empty.textContent = "还没有照片，点右下角「＋」添加";
+      wrap.appendChild(empty);
+      return;
+    }
+    var grid = document.createElement("div");
+    grid.className = "shot-grid";
+    shots.forEach(function (s, i) {
+      var card = document.createElement("div");
+      card.className = "shot-card";
+      var img = document.createElement("img");
+      img.className = "shot-card-img";
+      storage.thumbUrl(s.image).then(function (u) { if (u) img.src = u; });
+      card.appendChild(img);
+      card.addEventListener("click", function () { openShotViewer(i); });
+      grid.appendChild(card);
+    });
+    wrap.appendChild(grid);
+  }
+
+  function renderShots() {
+    var dv = ui.shotView;
+    if (!dv) return;
+    dv.innerHTML = "";
+    var top = document.createElement("div");
+    top.className = "shot-topbar";
+    var back = document.createElement("button");
+    back.className = "plan-back";
+    back.textContent = "‹";
+    back.addEventListener("click", exitShot);
+    var title = document.createElement("span");
+    title.className = "plan-title";
+    title.textContent = "随拍";
+    top.appendChild(back);
+    top.appendChild(title);
+    var search = document.createElement("input");
+    search.className = "shot-search";
+    search.type = "text";
+    search.placeholder = "搜索标签…";
+    search.addEventListener("input", function () {
+      renderShotGrid();
+      if (ui.shotView) ui.shotView.scrollTop = 0;   // 搜索时定位到顶部
+    });
+    top.appendChild(search);
+    dv.appendChild(top);
+    var wrap = document.createElement("div");
+    wrap.id = "shotGridWrap";
+    dv.appendChild(wrap);
+    renderShotGrid();
+    var fab = document.createElement("button");
+    fab.className = "shot-fab";
+    fab.textContent = "＋";
+    fab.addEventListener("click", function () { openAddShot(); });
+    dv.appendChild(fab);
+  }
+
+  function enterShot() {
+    if (viewingId) goBackToList();
+    var tb = document.getElementById("toolbar");
+    var sw = document.getElementById("searchWrap");
+    var fab = document.getElementById("btnAdd");
+    if (tb) tb.classList.add("hidden");
+    if (sw) sw.classList.add("hidden");
+    if (fab) fab.classList.add("hidden");
+    document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
+    ui.shotView.classList.remove("hidden");
+    renderShots();
+    ui.shotView.scrollTop = 0;   // 每次进入随拍回到顶部
+  }
+
+  function exitShot() {
+    ui.shotView.classList.add("hidden");
+    ui.shotView.innerHTML = "";
+    document.documentElement.style.overflow = "";
+    document.body.style.overflow = "";
+    exitDetailView();
+    renderList();
+    refreshTopBar();
+  }
+
+  // ---- 添加/编辑随拍弹窗 ----
+  function openAddShot() {
+    shotTags = [];
+    shotDataUrl = null;
+    shotFileName = null;
+    editingShotId = null;
+    if (ui.shotModalTitle) ui.shotModalTitle.textContent = "添加随拍";
+    if (ui.btnShotDelete) ui.btnShotDelete.classList.add("hidden");
+    if (ui.shotDesc) ui.shotDesc.value = "";
+    if (ui.shotTagInput) ui.shotTagInput.value = "";
+    if (ui.shotImgPreview) ui.shotImgPreview.innerHTML = "";
+    renderShotTags();
+    ui.shotModal.classList.remove("hidden");
+  }
+
+  function closeShotModal() {
+    ui.shotModal.classList.add("hidden");
+    // 若还在随拍大图, 重新进入沉浸式全屏
+    if (viewerShotMode && !ui.viewerMask.classList.contains("hidden")) {
+      if (FullscreenPlugin) { try { FullscreenPlugin.enter(); } catch (e) {} }
+    }
+  }
+
+  function renderShotTags() {
+    var box = ui.shotTagChips;
+    if (!box) return;
+    box.innerHTML = "";
+    shotTags.forEach(function (t, idx) {
+      var chip = document.createElement("span");
+      chip.className = "tag-chip";
+      var txt = document.createElement("span");
+      txt.className = "tag-chip-text";
+      txt.textContent = t;
+      var del = document.createElement("span");
+      del.className = "tag-chip-del";
+      del.textContent = "✕";
+      del.addEventListener("click", function () {
+        shotTags.splice(idx, 1);
+        renderShotTags();
+      });
+      chip.appendChild(txt);
+      chip.appendChild(del);
+      box.appendChild(chip);
+    });
+  }
+
+  function addShotTag() {
+    var v = ui.shotTagInput ? ui.shotTagInput.value.trim() : "";
+    if (!v) { showAlert("请输入标签"); return; }
+    if (shotTags.indexOf(v) >= 0) { showAlert("标签已存在"); return; }
+    shotTags.push(v);
+    if (ui.shotTagInput) ui.shotTagInput.value = "";
+    renderShotTags();
+  }
+
+  function pickShotImage(file) {
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      shotDataUrl = reader.result;
+      shotFileName = null;
+      var prev = ui.shotImgPreview;
+      if (prev) {
+        prev.innerHTML = "";
+        var img = document.createElement("img");
+        img.src = shotDataUrl;
+        prev.appendChild(img);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function saveShot() {
+    if (!shotFileName && !shotDataUrl) { showAlert("请选择照片"); return; }
+    // 自动把 tag 输入框里残留的字加进去
+    var tv = ui.shotTagInput ? ui.shotTagInput.value.trim() : "";
+    if (tv) {
+      if (shotTags.indexOf(tv) < 0) shotTags.push(tv);
+      if (ui.shotTagInput) ui.shotTagInput.value = "";
+    }
+    if (shotTags.length === 0) { showAlert("请至少添加一个标签"); return; }
+    if (shotDataUrl) {
+      storage.saveImage(shotDataUrl).then(function (fname) {
+        if (!fname) { toast("图片保存失败"); return; }
+        shotFileName = fname;
+        shotDataUrl = null;
+        doSaveShot();
+      });
+    } else {
+      doSaveShot();
+    }
+  }
+
+  function doSaveShot() {
+    if (editingShotId) {
+      var s = store.shots.find(function (x) { return x.id === editingShotId; });
+      if (s) {
+        if (shotFileName && shotFileName !== s.image) {
+          storage.deleteImage(s.image);
+          s.image = shotFileName;
+        }
+        s.tags = shotTags.slice();
+      }
+    } else {
+      store.shots.push({
+        id: genId(),
+        image: shotFileName,
+        desc: "",
+        tags: shotTags.slice(),
+        createdAt: Date.now()
+      });
+    }
+    storage.save().then(function () {
+      closeShotModal();
+      renderShotGrid();
+      // 若从大图编辑, 刷新当前大图
+      if (viewerShotMode && !ui.viewerMask.classList.contains("hidden")) {
+        openShotViewer(viewerIndex);
+      }
+    });
+  }
+
+  // ---- 随拍大图查看器 ----
+  function openShotViewer(index) {
+    if (shotViewerOpening) return;   // 防重入: 连续点击只认最后一次
+    var shots = filteredShots();
+    shotViewerShots = shots;
+    if (!shots.length) return;
+    if (index < 0 || index >= shots.length) index = 0;
+    shotViewerOpening = true;
+    // 懒加载回调: 切换时按需取图
+    viewerLoader = function (idx, cb) {
+      var s = shotViewerShots[idx];
+      if (!s) { cb(""); return; }
+      storage.imageUrl(s.image).then(function (u) { cb(u || ""); });
+    };
+    // 只加载当前 1 张, 立即打开(秒开), 其余切换时懒加载
+    var urls = new Array(shots.length);
+    storage.imageUrl(shots[index].image).then(function (u) {
+      urls[index] = u || "";
+      viewerShotMode = true;
+      openViewer(urls, index);
+      if (ui.viewerActions) ui.viewerActions.classList.remove("hidden");
+      shotViewerOpening = false;
+    });
+  }
+
+  function currentShot() {
+    return shotViewerShots[viewerIndex] || null;
+  }
+
+  function viewerDesc() {
+    var s = currentShot();
+    showAlert(s && s.desc ? s.desc : "暂无简介", "简介");
+  }
+
+  function viewerEdit() {
+    var s = currentShot();
+    if (!s) return;
+    // 退出沉浸式, 让编辑弹窗的键盘正常弹出(不挡 tag 输入框)
+    if (FullscreenPlugin) { try { FullscreenPlugin.exit(); } catch (e) {} }
+    editingShotId = s.id;
+    shotTags = (s.tags || []).slice();
+    shotFileName = s.image;
+    shotDataUrl = null;
+    if (ui.shotModalTitle) ui.shotModalTitle.textContent = "编辑随拍";
+    if (ui.btnShotDelete) ui.btnShotDelete.classList.remove("hidden");
+    if (ui.shotDesc) ui.shotDesc.value = s.desc || "";
+    if (ui.shotTagInput) ui.shotTagInput.value = "";
+    var prev = ui.shotImgPreview;
+    if (prev) {
+      prev.innerHTML = "";
+      storage.imageUrl(s.image).then(function (u) {
+        prev.innerHTML = "";
+        var img = document.createElement("img");
+        img.src = u;
+        prev.appendChild(img);
+      });
+    }
+    renderShotTags();
+    ui.shotModal.classList.remove("hidden");
+  }
+
+  function confirmDeleteShot() {
+    var s = currentShot();
+    if (!s) return;
+    deletingShotId = s.id;
+    ui.confirmName.textContent = "";
+    var titleEl = document.querySelector("#confirmMask .confirm-title");
+    var textEl = document.querySelector("#confirmMask .confirm-text");
+    if (titleEl) titleEl.textContent = "删除随拍";
+    if (textEl) textEl.textContent = "确定要删除这张照片吗？";
+    resetConfirmDeleteBtn();
+    ui.confirmMask.classList.remove("hidden");
+  }
+
+  async function doDeleteShot() {
+    var s = store.shots.find(function (x) { return x.id === deletingShotId; });
+    if (s) { await storage.deleteImage(s.image); }
+    store.shots = store.shots.filter(function (x) { return x.id !== deletingShotId; });
+    deletingShotId = null;
+    await storage.save();
+    ui.confirmMask.classList.add("hidden");
+    if (!ui.viewerMask.classList.contains("hidden")) { closeViewer(); }
+    renderShots();
+    toast("已删除");
   }
 
   function openDetail(id, fromList) {
@@ -1150,7 +2041,9 @@
     nameText.className = "detail-name-text";
     nameText.textContent = it.name || "详情";
     nameRow.appendChild(nameText);
-    var badge = it.kind === "bought" ? '<span class="badge bought">已买</span>' : '<span class="badge wish">心愿</span>';
+    var badge = it.kind === "bought" ? '<span class="badge bought">已买</span>'
+      : (it.kind === "unreleased" ? '<span class="badge unreleased">未发售</span>'
+      : '<span class="badge wish">心愿</span>');
     var badgeWrap = document.createElement("span");
     badgeWrap.className = "detail-name-badge";
     badgeWrap.innerHTML = badge;
@@ -1187,6 +2080,14 @@
       // 第3行：购买日期
       if (it.date) {
         info += '<div class="detail-row"><span class="detail-label">日期</span><span class="detail-buydate">' + esc(it.date) + '</span></div>';
+      }
+    } else if (it.kind === "unreleased") {
+      info += '<div class="detail-row"><span class="detail-label">状态</span><span class="detail-unreleased">未发售</span></div>';
+      if (it.releaseDate) {
+        info += '<div class="detail-row"><span class="detail-label">预计发售</span><span class="detail-value">' + esc(it.releaseDate) + '</span></div>';
+      }
+      if (it.releasePrice != null && it.releasePrice !== "") {
+        info += '<div class="detail-row"><span class="detail-label">预计价格</span><span class="detail-price">' + esc(it.releasePrice) + esc(it.releasePriceUnit || "元") + '</span></div>';
       }
     } else {
       info += '<div class="detail-row"><span class="detail-label">状态</span><span class="detail-wish">尚未购买 · 心愿收藏</span></div>';
@@ -1275,6 +2176,9 @@
     ui.inpBrand.value = "";
     ui.inpPrice.value = "";
     ui.inpDate.value = "";
+    if (ui.inpReleaseDate) ui.inpReleaseDate.value = "";
+    if (ui.inpReleasePrice) ui.inpReleasePrice.value = "";
+    if (ui.inpReleasePriceUnit) ui.inpReleasePriceUnit.value = "元";
     setKind("wish");
     pendingImages = [];
     pendingTags = [];
@@ -1287,6 +2191,9 @@
   function openModal(title) {
     ui.modalTitle.textContent = title;
     ui.modalMask.classList.remove("hidden");
+    // 每次打开弹窗都回到顶部(避免保留上一次滚动位置)
+    var body = ui.modalMask.querySelector(".modal-body");
+    if (body) body.scrollTop = 0;
   }
   function closeModal() {
     ui.modalMask.classList.add("hidden");
@@ -1304,9 +2211,12 @@
     editingId = id;
     ui.inpName.value = it.name || "";
     ui.inpBrand.value = "";
-    setKind(it.kind === "bought" ? "bought" : "wish");
+    setKind(it.kind === "bought" ? "bought" : (it.kind === "unreleased" ? "unreleased" : "wish"));
     ui.inpPrice.value = it.price != null && it.price !== "" ? it.price : "";
     ui.inpDate.value = it.date || "";
+    if (ui.inpReleaseDate) ui.inpReleaseDate.value = it.releaseDate || "";
+    if (ui.inpReleasePrice) ui.inpReleasePrice.value = it.releasePrice != null && it.releasePrice !== "" ? it.releasePrice : "";
+    if (ui.inpReleasePriceUnit) ui.inpReleasePriceUnit.value = it.releasePriceUnit || "元";
 
     // pendingImages: 已存在的图片文件名填入(显示时异步取URL)
     pendingImages = validImages(it).map(function (d) { return { name: d }; });
@@ -1406,8 +2316,8 @@
   function addTagFromInput() {
     if (!ui.inpTag) return;
     var v = ui.inpTag.value.trim();
-    if (!v) { toast("请输入标签内容"); return; }
-    if (pendingTags.indexOf(v) >= 0) { toast("标签已存在"); return; }
+    if (!v) { showAlert("请输入标签内容"); return; }
+    if (pendingTags.indexOf(v) >= 0) { showAlert("标签已存在"); return; }
     pendingTags.push(v);
     ui.inpTag.value = "";
     renderTagChips();
@@ -1485,6 +2395,7 @@
   // 状态切换
   ui.kindBought.addEventListener("click", function () { setKind("bought"); });
   ui.kindWish.addEventListener("click", function () { setKind("wish"); });
+  ui.kindUnreleased.addEventListener("click", function () { setKind("unreleased"); });
 
   // 保存（带防抖: 保存中禁止重复提交, 防止连点产生多个词条）
   var saving = false;
@@ -1514,16 +2425,29 @@
       if (isNaN(priceVal) || priceVal < 0) { showAlert("购买价格格式不正确"); return; }
       if (!ui.inpDate.value) { showAlert("已买商品请填写购买日期"); return; }
     }
+    // 未发售: 预计发售时间/预计价格均为选填, 仅当价格填写时校验格式
+    if (kind === "unreleased") {
+      var rpv = ui.inpReleasePrice ? ui.inpReleasePrice.value.trim() : "";
+      if (rpv !== "") {
+        var rpVal = parseFloat(rpv);
+        if (isNaN(rpVal) || rpVal < 0) { showAlert("预计价格格式不正确"); return; }
+      }
+    }
 
     saving = true;
     ui.btnSave.disabled = true;
     ui.btnSave.textContent = "保存中…";
     try {
 
-    var record = { name: name, brand: pendingBrands.slice(), kind: kind, price: null, date: "", tags: pendingTags.slice() };
+    var record = { name: name, brand: pendingBrands.slice(), kind: kind, price: null, date: "", releaseDate: "", releasePrice: null, releasePriceUnit: "元", tags: pendingTags.slice() };
     if (record.kind === "bought") {
       record.price = parseFloat(ui.inpPrice.value.trim());
       record.date = ui.inpDate.value;
+    } else if (record.kind === "unreleased") {
+      record.releaseDate = ui.inpReleaseDate ? ui.inpReleaseDate.value.trim() : "";
+      var rpv2 = ui.inpReleasePrice ? ui.inpReleasePrice.value.trim() : "";
+      record.releasePrice = rpv2 !== "" ? parseFloat(rpv2) : null;
+      record.releasePriceUnit = (ui.inpReleasePriceUnit && ui.inpReleasePriceUnit.value) || "元";
     }
 
     // 图片处理: 新图写文件, 旧图沿用文件名, 移除的旧图删除文件
@@ -1572,7 +2496,12 @@
       if (idx >= 0) {
         record.id = editingId;
         record.createdAt = store.list[idx].createdAt || Date.now();
+        record.sortOrder = store.list[idx].sortOrder;   // 继承原排序号, 编辑后位置不变
         store.list[idx] = record;
+        // 心愿变已购: 从购买计划里删除该模型的心愿条目(已购会按购买日期自动拉入)
+        if (record.kind === "bought") {
+          store.plans = store.plans.filter(function (p) { return p.modelId !== editingId; });
+        }
       }
       toast("已保存");
     } else {
@@ -1613,6 +2542,7 @@
     if (!it) return;
     deletingId = id;
     ui.confirmName.textContent = it.name || "";
+    resetConfirmDeleteBtn();
     ui.confirmMask.classList.remove("hidden");
   }
 
@@ -1624,6 +2554,8 @@
       }
     }
     store.list = store.list.filter(function (x) { return x.id !== deletingId; });
+    // 级联: 同时删除该模型对应的购买计划条目
+    store.plans = store.plans.filter(function (p) { return p.modelId !== deletingId; });
     await storage.save();
     ui.confirmMask.classList.add("hidden");
     deletingId = null;
@@ -1656,18 +2588,86 @@
     ui.modalMask.addEventListener("click", function (e) { if (e.target === ui.modalMask) closeModal(); });
 
     if (ui.btnAlertOk) ui.btnAlertOk.addEventListener("click", function () { ui.alertMask.classList.add("hidden"); });
+    if (ui.btnImportDone) ui.btnImportDone.addEventListener("click", function () { if (!ui.btnImportDone.disabled) closeImportMask(); });
     if (ui.alertMask) ui.alertMask.addEventListener("click", function (e) { if (e.target === ui.alertMask) ui.alertMask.classList.add("hidden"); });
 
-    ui.btnYes.addEventListener("click", doDelete);
-    ui.btnNo.addEventListener("click", function () { ui.confirmMask.classList.add("hidden"); deletingId = null; });
+    ui.btnYes.addEventListener("click", function () {
+      if (saveImagePending) { saveImagePending = false; doSaveImage(); return; }
+      if (deletingShotId) { doDeleteShot(); }
+      else if (deletingPlanId) { doDeletePlan(); }
+      else { doDelete(); }
+    });
+    ui.btnNo.addEventListener("click", function () { ui.confirmMask.classList.add("hidden"); deletingId = null; deletingPlanId = null; deletingShotId = null; saveImagePending = false; });
     ui.confirmMask.addEventListener("click", function (e) {
-      if (e.target === ui.confirmMask) { ui.confirmMask.classList.add("hidden"); deletingId = null; }
+      if (e.target === ui.confirmMask) { ui.confirmMask.classList.add("hidden"); deletingId = null; deletingPlanId = null; deletingShotId = null; }
+    });
+    // 购买计划
+    if (ui.btnPlan) ui.btnPlan.addEventListener("click", enterPlan);
+    if (ui.btnPlanModalClose) ui.btnPlanModalClose.addEventListener("click", closeAddPlan);
+    if (ui.btnPlanCancel) ui.btnPlanCancel.addEventListener("click", closeAddPlan);
+    if (ui.btnPlanSave) ui.btnPlanSave.addEventListener("click", savePlan);
+    if (ui.planModal) ui.planModal.addEventListener("click", function (e) { if (e.target === ui.planModal) closeAddPlan(); });
+    if (ui.planMonthTrigger) ui.planMonthTrigger.addEventListener("click", togglePlanMonth);
+    if (ui.planSearch) ui.planSearch.addEventListener("input", function () { renderPlanModels(); });
+    // 随拍
+    if (ui.btnShot) ui.btnShot.addEventListener("click", enterShot);
+    if (ui.btnShotModalClose) ui.btnShotModalClose.addEventListener("click", closeShotModal);
+    if (ui.btnShotCancel) ui.btnShotCancel.addEventListener("click", closeShotModal);
+    if (ui.btnShotSave) ui.btnShotSave.addEventListener("click", saveShot);
+    if (ui.btnShotDelete) ui.btnShotDelete.addEventListener("click", function () {
+      closeShotModal();
+      confirmDeleteShot();
+    });
+    if (ui.shotModal) ui.shotModal.addEventListener("click", function (e) { if (e.target === ui.shotModal) closeShotModal(); });
+    if (ui.btnShotPickImg) ui.btnShotPickImg.addEventListener("click", function () { ui.shotFileInput.click(); });
+    if (ui.shotFileInput) ui.shotFileInput.addEventListener("change", function () {
+      var f = ui.shotFileInput.files && ui.shotFileInput.files[0];
+      ui.shotFileInput.value = "";
+      if (f) pickShotImage(f);
+    });
+    if (ui.btnShotAddTag) ui.btnShotAddTag.addEventListener("click", addShotTag);
+    if (ui.shotTagInput) ui.shotTagInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.keyCode === 13) { e.preventDefault(); addShotTag(); }
+    });
+    if (ui.btnViewerDesc) ui.btnViewerDesc.addEventListener("click", viewerDesc);
+    if (ui.btnViewerEdit) ui.btnViewerEdit.addEventListener("click", viewerEdit);
+    // 弹窗输入框聚焦时滚到键盘上方, 避免被遮挡(聚焦 + 键盘弹出 resize 都滚动)
+    var activeInput = null;
+    function scrollActiveInput() {
+      if (!activeInput) return;
+      setTimeout(function () {
+        try { activeInput.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { activeInput.scrollIntoView(); }
+      }, 120);
+    }
+    ["inpName", "inpBrand", "inpTag", "inpPrice", "inpReleaseDate", "inpReleasePrice", "planPrice", "shotTagInput", "shotDesc"].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("focus", function () {
+          activeInput = el;
+          scrollActiveInput();
+        });
+        el.addEventListener("blur", function () { if (activeInput === el) activeInput = null; });
+      }
+    });
+    window.addEventListener("resize", scrollActiveInput);
+    // 文件选择器关闭后: 若没选文件, 关闭"请选择文件"弹窗(防卡死)
+    window.addEventListener("focus", function () {
+      setTimeout(function () {
+        if (ui.importMask && !ui.importMask.classList.contains("hidden")) {
+          if (ui.btnImportDone && ui.btnImportDone.disabled && ui.btnImportDone.textContent === "请选择文件") {
+            if (!(ui.importInput && ui.importInput.files && ui.importInput.files.length)) {
+              closeImportMask();
+            }
+          }
+        }
+      }, 300);
     });
 
     if (ui.btnEdit) ui.btnEdit.addEventListener("click", function (e) {
       e.stopPropagation();
       if (ui.editMenu) ui.editMenu.classList.toggle("hidden");
     });
+    if (ui.btnFilter) ui.btnFilter.addEventListener("click", openFilter);
     if (ui.btnSort) ui.btnSort.addEventListener("click", function () { enterSortMode(); });
     if (ui.btnExitSort) ui.btnExitSort.addEventListener("click", function () { exitSortMode(); });
     if (ui.editMenu) ui.editMenu.addEventListener("click", function () {
@@ -1780,16 +2780,29 @@
 
     ui.sortSelect.addEventListener("change", function () { saveUiState(); renderList(); });
 
-    ui.tabs.forEach(function (tab) {
-      tab.addEventListener("click", function () {
-        ui.tabs.forEach(function (t) { t.classList.remove("active"); });
-        tab.classList.add("active");
-        currentFilter = tab.getAttribute("data-filter");
-        updateSortVisibility();
-        saveUiState();
-        renderList();
-      });
-    });
+    // 筛选弹窗
+    if (ui.btnFilterOk) ui.btnFilterOk.addEventListener("click", applyFilter);
+    if (ui.btnFilterCancel) ui.btnFilterCancel.addEventListener("click", closeFilter);
+    if (ui.filterMask) ui.filterMask.addEventListener("click", function (e) { if (e.target === ui.filterMask) closeFilter(); });
+
+    // 长按左上角标题: 统计已买总消费
+    var appTitle = document.querySelector(".app-title");
+    if (appTitle) {
+      var titleTimer = null;
+      function titlePress() {
+        titleTimer = setTimeout(function () {
+          titleTimer = null;
+          showAlert("共累计消费：¥" + formatMoney(totalSpent()), "累计消费");
+        }, 500);
+      }
+      function titleRelease() { if (titleTimer) { clearTimeout(titleTimer); titleTimer = null; } }
+      appTitle.addEventListener("touchstart", titlePress);
+      appTitle.addEventListener("touchend", titleRelease);
+      appTitle.addEventListener("touchmove", titleRelease);
+      appTitle.addEventListener("mousedown", titlePress);
+      appTitle.addEventListener("mouseup", titleRelease);
+      appTitle.addEventListener("mouseleave", titleRelease);
+    }
 
     // 系统返回键/侧滑返回支持
     var App = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App;
@@ -1800,7 +2813,17 @@
           ui.alertMask.classList.add("hidden");
           return;
         }
-        // 0) 图片查看器打开 -> 优先关闭查看器
+        // 0) 导入弹窗 -> 导入中不关闭(强制等待), 完成后可关闭
+        if (ui.importMask && !ui.importMask.classList.contains("hidden")) {
+          if (ui.btnImportDone && !ui.btnImportDone.disabled) closeImportMask();
+          return;
+        }
+        // 0) 随拍编辑弹窗打开 -> 先关编辑弹窗(顺序: 编辑 -> 大图)
+        if (ui.shotModal && !ui.shotModal.classList.contains("hidden")) {
+          closeShotModal();
+          return;
+        }
+        // 0) 图片查看器打开 -> 关闭查看器
         if (ui.viewerMask && !ui.viewerMask.classList.contains("hidden")) {
           closeViewer();
           return;
@@ -1821,12 +2844,42 @@
           ui.exportMask.classList.add("hidden");
           return;
         }
+        if (ui.filterMask && !ui.filterMask.classList.contains("hidden")) {
+          closeFilter();
+          return;
+        }
         // 2) 编辑/添加弹窗 -> 关闭
         if (!ui.modalMask.classList.contains("hidden")) {
           closeModal();
           return;
         }
-        // 3) 详情页 -> 返回列表(并恢复之前滚动位置)
+        // 2.5) 添加计划弹窗 -> 关闭
+        if (ui.planModal && !ui.planModal.classList.contains("hidden")) {
+          closeAddPlan();
+          return;
+        }
+        // 2.6) 随拍弹窗 -> 关闭
+        if (ui.shotModal && !ui.shotModal.classList.contains("hidden")) {
+          closeShotModal();
+          return;
+        }
+        // 3) 计划页 -> 返回列表
+        if (ui.planView && !ui.planView.classList.contains("hidden")) {
+          exitPlan();
+          return;
+        }
+        // 3.1) 随拍页 -> 先清空搜索词, 再返回列表
+        if (ui.shotView && !ui.shotView.classList.contains("hidden")) {
+          var si = ui.shotView.querySelector(".shot-search");
+          if (si && si.value.trim()) {
+            si.value = "";
+            renderShots();
+            return;
+          }
+          exitShot();
+          return;
+        }
+        // 3.5) 详情页 -> 返回列表(并恢复之前滚动位置)
         if (viewingId) {
           goBackToList();
           return;
@@ -1846,7 +2899,7 @@
     if (!isNative) { toast("导入仅在真机可用"); return; }
     if (!ui.importInput) { toast("系统选择器不可用"); return; }
     ui.importInput.value = "";   // 允许重新选择同一文件
-    ui.importInput.click();
+    ui.importInput.click();      // 直接打开文件选择器(选完才弹"正在导入")
   }
 
   // 绑定导入文件 input 的 change
@@ -1858,20 +2911,20 @@
 
   function onImportFileChange() {
     var file = ui.importInput && ui.importInput.files && ui.importInput.files[0];
-    if (!file) return;
+    if (!file) { closeImportMask(); return; }   // 取消选择则关闭弹窗
+    showImportWaiting();                          // 选完立即变"正在导入", 一直显示到完成
     var reader = new FileReader();
     reader.onload = async function () {
       try {
         var content = reader.result;
-        toast("正在恢复…");
         var cnt = await storage.importFromJson(content);
         renderList();
-        toast("已恢复 " + cnt + " 条记录");
+        showImportDone(cnt);
       } catch (e) {
-        toast("导入失败: " + (e && e.message || "文件格式错误"));
+        showImportFail("导入失败: " + (e && e.message || "文件格式错误"));
       }
     };
-    reader.onerror = function () { toast("读取文件失败"); };
+    reader.onerror = function () { showImportFail("读取文件失败"); };
     reader.readAsText(file);
   }
 
@@ -1881,6 +2934,7 @@
   var viewer = { scale: 1, tx: 0, ty: 0, dist: 0, mtx: 0, mty: 0, pinch: false, down: false, lastTap: 0, swipeStartX: 0, swipeStartY: 0 };
   var viewerImages = [];   // 当前查看器的图片 URL 列表
   var viewerIndex = 0;     // 当前图片索引
+  var viewerLoader = null; // 懒加载回调: (idx, cb) => 异步取 URL 后 cb(url)
 
   function viewerReset() {
     viewer.scale = 1; viewer.tx = 0; viewer.ty = 0;
@@ -1959,9 +3013,28 @@
   // 显示当前索引的图片(当前图 + 预加载下一张), 并重置缩放和 track
   function showViewerImage() {
     viewerReset();
-    ui.viewerImg.src = viewerImages[viewerIndex] || "";
-    ui.viewerImg2.src = viewerImages[viewerIndex + 1] || "";
+    loadViewerSlide(ui.viewerImg, viewerIndex);
+    loadViewerSlide(ui.viewerImg2, viewerIndex + 1);
     setTrack(0, false);
+  }
+
+  // 加载某张图到 img 元素: 有 URL 直接用, 无则懒加载(随拍模式)
+  function loadViewerSlide(imgEl, idx) {
+    if (idx < 0 || idx >= viewerImages.length) { imgEl.src = ""; return; }
+    var u = viewerImages[idx];
+    if (u) {
+      imgEl.src = u;
+    } else if (viewerLoader) {
+      viewerLoader(idx, function (url) {
+        var v = url || "";
+        viewerImages[idx] = v;   // 写回缓存, 下次切换直接秒开
+        // 防竞态: 只有该 img 元素还对应这个索引时才更新, 避免旧回调盖新图
+        if (imgEl === ui.viewerImg && viewerIndex === idx) imgEl.src = v;
+        else if (imgEl === ui.viewerImg2 && viewerIndex + 1 === idx) imgEl.src = v;
+      });
+    } else {
+      imgEl.src = "";
+    }
   }
 
   // 关闭后, 让详情页聚焦到当前查看的图片(尽量居中)
@@ -1976,21 +3049,68 @@
     }
   }
 
+  // 长按大图: 弹保存确认
+  function onViewerLongPress() {
+    if (ui.viewerMask.classList.contains("hidden")) return;
+    saveImagePending = true;
+    ui.confirmName.textContent = "";
+    var titleEl = document.querySelector("#confirmMask .confirm-title");
+    var textEl = document.querySelector("#confirmMask .confirm-text");
+    if (titleEl) titleEl.textContent = "保存图片";
+    if (textEl) textEl.textContent = "确定要保存这张图片到相册吗？";
+    if (ui.btnYes) { ui.btnYes.textContent = "保存"; ui.btnYes.className = "btn btn-save"; }
+    ui.confirmMask.classList.remove("hidden");
+  }
+
+  // 恢复删除确认按钮文案/颜色
+  function resetConfirmDeleteBtn() {
+    if (ui.btnYes) { ui.btnYes.textContent = "确认删除"; ui.btnYes.className = "btn btn-danger"; }
+  }
+
+  // 保存当前大图到相册
+  function doSaveImage() {
+    ui.confirmMask.classList.add("hidden");
+    var src = viewerImages[viewerIndex];
+    if (!src) { showAlert("图片还没加载完"); return; }
+    var base64 = src.indexOf("data:") === 0 ? src.slice(src.indexOf(",") + 1) : src;
+    if (BackupScannerPlugin && BackupScannerPlugin.saveImageToGallery) {
+      BackupScannerPlugin.saveImageToGallery({ base64: base64 }).then(function () {
+        toast("已保存到相册");
+      }).catch(function (e) {
+        showAlert("保存失败: " + (e && e.message || e));
+      });
+    } else {
+      showAlert("当前环境不支持保存");
+    }
+  }
+
   function openViewer(images, index) {
-    viewerImages = (images || []).filter(function (u) { return !!u; });
-    var clickedUrl = images && images[index];
-    var ni = viewerImages.indexOf(clickedUrl);
-    if (ni < 0) ni = 0;
-    viewerIndex = ni;
+    viewerImages = images || [];   // 保留空位(懒加载时未加载的项是 undefined)
+    viewerIndex = (index >= 0 && index < viewerImages.length) ? index : 0;
     showViewerImage();
-    ui.viewerMask.classList.remove("hidden");
-    if (FullscreenPlugin) { try { FullscreenPlugin.enter(); } catch (e) {} }
+    // 先进入全屏, 完成后再显示大图, 避免图片"先偏上再下移"的跳动
+    var show = function () { ui.viewerMask.classList.remove("hidden"); };
+    if (FullscreenPlugin) {
+      try {
+        FullscreenPlugin.enter().then(show).catch(show);
+      } catch (e) { show(); }
+    } else {
+      show();
+    }
   }
 
   function closeViewer() {
     ui.viewerMask.classList.add("hidden");
     viewerReset();
     if (FullscreenPlugin) { try { FullscreenPlugin.exit(); } catch (e) {} }
+    if (viewerShotMode) {
+      viewerShotMode = false;
+      shotViewerShots = [];
+      viewerLoader = null;
+      shotViewerOpening = false;
+      if (ui.viewerActions) ui.viewerActions.classList.add("hidden");
+      return;
+    }
     focusDetailImage(viewerIndex);
   }
 
@@ -2011,6 +3131,7 @@
     var swipeActive = false;   // 是否正在跟手左右滑动
     var swipeDir = 0;          // 滑动方向: -1 左滑(看下一张), +1 右滑(看上一张)
     var swipeBase = 0;         // 跟手滑动时 track 的基准位移
+    var longPressTimer = null; // 长按保存检测
 
     mask.addEventListener("pointerdown", function (e) {
       pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
@@ -2023,9 +3144,16 @@
         viewer.swipeStartX = e.clientX;
         viewer.swipeStartY = e.clientY;
         swipeActive = false;
+        // 长按检测(静止 500ms 弹保存)
+        clearTimeout(longPressTimer);
+        longPressTimer = setTimeout(function () {
+          longPressTimer = null;
+          onViewerLongPress();
+        }, 500);
       } else if (count === 2) {
         viewer.pinch = true;
         swipeActive = false;   // 双指时取消跟手滑动
+        clearTimeout(longPressTimer);
         var ids = Object.keys(pointers);
         var p0 = pointers[ids[0]], p1 = pointers[ids[1]];
         viewer.dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
@@ -2034,6 +3162,12 @@
 
     mask.addEventListener("pointermove", function (e) {
       if (!pointers[e.pointerId]) return;
+      // 移动超过阈值则取消长按
+      if (longPressTimer) {
+        var ldx = Math.abs(e.clientX - viewer.swipeStartX);
+        var ldy = Math.abs(e.clientY - viewer.swipeStartY);
+        if (ldx > 10 || ldy > 10) { clearTimeout(longPressTimer); longPressTimer = null; }
+      }
       pointers[e.pointerId] = { x: e.clientX, y: e.clientY };
       var ids = Object.keys(pointers);
       var count = ids.length;
@@ -2088,6 +3222,8 @@
     });
 
     function endPointer(e) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
       var wasPinch = viewer.pinch;
       var count = Object.keys(pointers).length;
       var didSwipe = false;
@@ -2148,7 +3284,7 @@
   // ==============================================================
   // 弹窗打开时锁定背景滚动
   // ==============================================================
-  var SCROLL_MASKS = ["modalMask", "confirmMask", "exportMask", "bakMask", "viewerMask"];
+  var SCROLL_MASKS = ["modalMask", "confirmMask", "exportMask", "bakMask", "viewerMask", "planModal", "shotModal", "alertMask", "importMask", "filterMask"];
 
   function refreshScrollLock() {
     var anyOpen = SCROLL_MASKS.some(function (key) {
@@ -2199,13 +3335,14 @@
           row.disabled = true;
           row.textContent = "恢复中…";
           try {
+            showImportWaiting();
             var cnt = await storage.importBackup(name);
             ui.bakMask.classList.add("hidden");
             renderList();
-            toast("已恢复 " + cnt + " 条记录");
+            showImportDone(cnt);
           } catch (e) {
-            toast("导入失败: " + (e && e.message || e));
             ui.bakMask.classList.add("hidden");
+            showImportFail("导入失败: " + (e && e.message || e));
           }
         });
         ui.bakList.appendChild(row);

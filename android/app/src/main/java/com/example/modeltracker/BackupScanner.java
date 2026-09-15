@@ -3,6 +3,7 @@ package com.example.modeltracker;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
+import android.media.MediaScannerConnection;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -32,6 +33,44 @@ public class BackupScanner extends Plugin {
 
     private static final String PREFIX = "model_checker_";
     private static final int B64_BLOCK = 15360;   // 15KB, 3的倍数, 保证每个 base64 块不对齐破坏
+
+    // 把 base64 图片保存到系统相册(Pictures/ModelTracker)
+    @PluginMethod()
+    public void saveImageToGallery(PluginCall call) {
+        String base64 = call.getString("base64");
+        if (base64 == null || base64.isEmpty()) { call.reject("base64 missing"); return; }
+        try {
+            byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+            saveToMediaStore(bytes);
+            call.resolve(new JSObject().put("ok", true));
+        } catch (Exception e) {
+            call.reject("save error: " + e.getMessage());
+        }
+    }
+
+    private void saveToMediaStore(byte[] bytes) throws Exception {
+        Context ctx = getContext();
+        String name = "ModelTracker_" + System.currentTimeMillis() + ".jpg";
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.Images.Media.DISPLAY_NAME, name);
+            values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+            values.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ModelTracker");
+            Uri collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            Uri uri = ctx.getContentResolver().insert(collection, values);
+            if (uri == null) throw new Exception("insert fail");
+            OutputStream os = ctx.getContentResolver().openOutputStream(uri);
+            if (os == null) throw new Exception("open stream fail");
+            try { os.write(bytes); } finally { try { os.close(); } catch (Exception ignored) {} }
+        } else {
+            File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "ModelTracker");
+            if (!dir.exists()) dir.mkdirs();
+            File dst = new File(dir, name);
+            FileOutputStream fos = new FileOutputStream(dst);
+            try { fos.write(bytes); } finally { try { fos.close(); } catch (Exception ignored) {} }
+            MediaScannerConnection.scanFile(ctx, new String[]{ dst.getAbsolutePath() }, null, null);
+        }
+    }
 
     @PluginMethod()
     public void scan(PluginCall call) {
@@ -82,21 +121,16 @@ public class BackupScanner extends Plugin {
             OutputStream os = openPublicOutputStream(publicName);
             if (os == null) throw new Exception("open output fail");
 
-            byte[] buf = new byte[64 * 1024];
-            int n;
             try {
-                // 1) {"list":
-                os.write("{\"list\":".getBytes(StandardCharsets.UTF_8));
-                // 2) data.json 内容(分块流式, data.json 可能是大数组)
+                // 1) 读 data.json(现在是 {"list":[...],"plans":[...]})，去掉末尾 } 后写入
                 if (dataFile.isFile()) {
-                    FileInputStream dfin = new FileInputStream(dataFile);
-                    try {
-                        while ((n = dfin.read(buf)) != -1) os.write(buf, 0, n);
-                    } finally { try { dfin.close(); } catch (Exception ignored) {} }
+                    String dataJson = readFile(dataFile);
+                    if (dataJson.endsWith("}")) dataJson = dataJson.substring(0, dataJson.length() - 1);
+                    os.write(dataJson.getBytes(StandardCharsets.UTF_8));
                 } else {
-                    os.write("[]".getBytes(StandardCharsets.UTF_8));
+                    os.write("{\"list\":[],\"plans\":[]".getBytes(StandardCharsets.UTF_8));
                 }
-                // 3) ,"images":{
+                // 2) ,"images":{
                 os.write(",\"images\":{".getBytes(StandardCharsets.UTF_8));
 
                 // 4) 遍历 images/ 目录, 逐张图流式 base64 写入

@@ -15,10 +15,13 @@
       <span>模型收藏</span>
     </div>
     <div class="app-actions">
+      <button class="icon-btn" id="btnShot">随拍</button>
+      <button class="icon-btn" id="btnPlan">计划</button>
       <button class="icon-btn" id="btnSearch">搜索</button>
       <div class="edit-wrap">
         <button class="icon-btn" id="btnEdit">编辑</button>
         <div class="edit-menu hidden" id="editMenu">
+          <button class="edit-menu-item" id="btnFilter">筛选</button>
           <button class="edit-menu-item" id="btnImport">导入</button>
           <button class="edit-menu-item" id="btnExport">导出</button>
           <button class="edit-menu-item" id="btnSort">排序</button>
@@ -42,13 +45,8 @@
     <div class="search-sug hidden" id="searchSug"></div>
   </div>
 
-  <!-- 筛选 Tab + 排序 -->
+  <!-- 筛选(编辑菜单) + 排序 -->
   <div class="toolbar" id="toolbar">
-    <nav class="tabs">
-      <button class="tab active" data-filter="all">全部 <span class="count" id="countAll">0</span></button>
-      <button class="tab" data-filter="bought">已买 <span class="count" id="countBought">0</span></button>
-      <button class="tab" data-filter="wish">未买 <span class="count" id="countWish">0</span></button>
-    </nav>
     <div class="sort-wrap hidden" id="sortWrap">
       <span class="sort-label">排序</span>
       <select id="sortSelect" class="sort-select">
@@ -98,6 +96,7 @@
           <div class="seg">
             <button class="seg-btn" data-kind="bought" id="kindBought">已买</button>
             <button class="seg-btn active" data-kind="wish" id="kindWish">未买</button>
+            <button class="seg-btn" data-kind="unreleased" id="kindUnreleased">未发售</button>
           </div>
         </div>
 
@@ -109,6 +108,23 @@
         <div class="field" id="dateGroup">
           <label>购买日期</label>
           <input type="date" id="inpDate">
+        </div>
+
+        <div class="field hidden" id="releaseDateGroup">
+          <label>预计发售时间（选填）</label>
+          <input type="text" id="inpReleaseDate" placeholder="如：2025年3月 / 2025 Q3">
+        </div>
+
+        <div class="field hidden" id="releasePriceGroup">
+          <label>预计价格（选填）</label>
+          <div class="price-unit-row">
+            <input type="number" id="inpReleasePrice" step="0.01" min="0" placeholder="金额">
+            <select id="inpReleasePriceUnit" class="price-unit-select">
+              <option value="元" selected>元</option>
+              <option value="美元">美元</option>
+              <option value="日元">日元</option>
+            </select>
+          </div>
         </div>
 
         <div class="field">
@@ -130,6 +146,74 @@
       <div class="modal-footer">
         <button class="btn btn-cancel" id="btnCancel">取消</button>
         <button class="btn btn-save" id="btnSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加购买计划弹窗 -->
+  <div class="modal-mask hidden center" id="planModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>添加购买计划</span>
+        <button class="icon-btn modal-close" id="btnPlanModalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>预计月份</label>
+          <div class="plan-month-select">
+            <div class="plan-month-trigger" id="planMonthTrigger">
+              <span id="planMonthLabel">请选择月份</span>
+              <span class="plan-month-arrow">▾</span>
+            </div>
+            <div class="plan-month-dropdown hidden" id="planMonthDropdown"></div>
+          </div>
+        </div>
+        <div class="field">
+          <label>搜索模型</label>
+          <input type="text" id="planSearch" class="plan-search" placeholder="搜索心愿模型，如：假面骑士">
+        </div>
+        <div class="field">
+          <label>选择模型（未买 / 未发售）</label>
+          <div class="plan-model-list" id="planModelList"></div>
+        </div>
+        <div class="field">
+          <label>预计金额（元）</label>
+          <input type="number" id="planPrice" step="1" min="0" inputmode="numeric" placeholder="如 300">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-cancel" id="btnPlanCancel">取消</button>
+        <button class="btn btn-save" id="btnPlanSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 添加/编辑随拍弹窗 -->
+  <div class="modal-mask hidden center" id="shotModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span id="shotModalTitle">添加随拍</span>
+        <button class="icon-btn modal-close" id="btnShotModalClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <label>照片</label>
+          <div class="shot-img-preview" id="shotImgPreview"></div>
+          <button class="btn-add-img" id="btnShotPickImg">＋ 选择照片</button>
+          <input type="file" id="shotFileInput" accept="image/*" hidden>
+        </div>
+        <div class="field">
+          <label>标签（必填，可多个）</label>
+          <div class="tag-input-row">
+            <input type="text" id="shotTagInput" placeholder="输入标签，如：高达">
+            <button class="btn-add-tag" id="btnShotAddTag" type="button">添加</button>
+          </div>
+          <div class="tag-chips" id="shotTagChips"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger hidden" id="btnShotDelete">删除</button>
+        <button class="btn btn-save" id="btnShotSave">确认</button>
       </div>
     </div>
   </div>
@@ -192,11 +276,56 @@
     </div>
   </div>
 
+  <!-- 筛选状态多选框弹窗 -->
+  <div class="modal-mask hidden center" id="filterMask">
+    <div class="confirm-sheet">
+      <div class="confirm-title">筛选状态</div>
+      <div class="filter-list">
+        <label class="filter-item">
+          <input type="checkbox" value="bought" id="filterBought">
+          <span class="filter-label">已购买</span>
+          <span class="filter-count" id="filterCountBought">0</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" value="wish" id="filterWish">
+          <span class="filter-label">未购买</span>
+          <span class="filter-count" id="filterCountWish">0</span>
+        </label>
+        <label class="filter-item">
+          <input type="checkbox" value="unreleased" id="filterUnreleased">
+          <span class="filter-label">未发售</span>
+          <span class="filter-count" id="filterCountUnreleased">0</span>
+        </label>
+      </div>
+      <div class="confirm-actions">
+        <button class="btn btn-cancel" id="btnFilterCancel">取消</button>
+        <button class="btn btn-save" id="btnFilterOk">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入等待弹窗 -->
+  <div class="modal-mask hidden center" id="importMask">
+    <div class="confirm-sheet">
+      <div class="confirm-title" id="importTitle">正在导入</div>
+      <p class="confirm-text" id="importText">正在恢复数据，请稍候…</p>
+      <div class="confirm-actions">
+        <button class="btn btn-save" id="btnImportDone" disabled>导入中…</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 隐藏文件选择器: 用于导入备份json -->
   <input type="file" id="importInput" accept=".json,.txt,application/json" hidden>
 
   <!-- 详情独立滚动容器 -->
   <div class="detail-view hidden" id="detailView"></div>
+
+  <!-- 购买计划页(独立滚动容器) -->
+  <div class="plan-view hidden" id="planView"></div>
+
+  <!-- 随拍页(独立滚动容器) -->
+  <div class="shot-view hidden" id="shotView"></div>
 
   <!-- 全屏图片查看器(缩放/拖动/左右滑动切换, 点空白或按返回键关闭) -->
   <div class="viewer-mask hidden" id="viewerMask">
@@ -205,6 +334,9 @@
         <div class="viewer-cell"><img id="viewerImg" src="" alt=""></div>
         <div class="viewer-cell"><img id="viewerImg2" src="" alt=""></div>
       </div>
+    </div>
+    <div class="viewer-actions hidden" id="viewerActions">
+      <button class="viewer-action-btn" id="btnViewerEdit">编辑</button>
     </div>
   </div>
 
