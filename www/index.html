@@ -34,11 +34,6 @@
   <!-- 搜索栏 (默认隐藏) -->
   <div class="search-wrap hidden" id="searchWrap">
     <div class="search-box">
-      <select id="searchScope" class="search-scope">
-        <option value="all" selected>全部</option>
-        <option value="name">名称</option>
-        <option value="tag">标签</option>
-      </select>
       <input type="text" id="searchInput" placeholder="搜索...">
       <button class="icon-btn" id="btnSearchSubmit" type="button">搜索</button>
     </div>
@@ -83,12 +78,30 @@
         </div>
 
         <div class="field">
+          <label>搜索词（选填，用于跳转淘宝 / 拼多多搜索）</label>
+          <input type="text" id="inpSearchKeyword" placeholder="留空则用「名称 + 品牌」搜索">
+        </div>
+
+        <div class="field">
           <label>品牌 / 厂商 / 系列</label>
           <div class="tag-input-row">
             <input type="text" id="inpBrand" placeholder="输入品牌，如：万代">
             <button class="btn-add-tag" id="btnAddBrand" type="button">添加</button>
           </div>
           <div class="tag-chips" id="brandChips"></div>
+        </div>
+
+        <div class="field">
+          <label>类别（必选）</label>
+          <select id="inpCategory" class="category-select">
+            <option value="" disabled selected>请选择类别</option>
+            <option value="手办">手办</option>
+            <option value="小比例车模">小比例车模</option>
+            <option value="可动人偶">可动人偶</option>
+            <option value="小比例可动人偶">小比例可动人偶</option>
+            <option value="机甲">机甲</option>
+            <option value="钢普拉">钢普拉</option>
+          </select>
         </div>
 
         <div class="field">
@@ -110,9 +123,9 @@
           <input type="date" id="inpDate">
         </div>
 
-        <div class="field hidden" id="releaseDateGroup">
-          <label>预计发售时间（选填）</label>
-          <input type="text" id="inpReleaseDate" placeholder="如：2025年3月 / 2025 Q3">
+        <div class="field" id="releaseMonthGroup">
+          <label>发售时间（选填）</label>
+          <input type="month" id="inpReleaseMonth">
         </div>
 
         <div class="field hidden" id="releasePriceGroup">

@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackupScanner.class);
         registerPlugin(FilePicker.class);
         registerPlugin(Fullscreen.class);
+        registerPlugin(ShopLauncher.class);
 
         super.onCreate(savedInstanceState);
 

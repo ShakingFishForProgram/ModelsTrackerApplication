@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.util.JsonReader;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -25,6 +26,7 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 
@@ -344,5 +346,144 @@ public class BackupScanner extends Plugin {
         dis.readFully(bytes);
         dis.close();
         return new String(bytes, StandardCharsets.UTF_8);
+    }
+
+    // 原生流式导入: 从 content uri 逐段解析备份, 图片边读边写私有目录, records 写回 data.json
+    @PluginMethod()
+    public void importFromUri(PluginCall call) {
+        String uriStr = call.getString("uri");
+        if (uriStr == null || uriStr.isEmpty()) { call.reject("uri missing"); return; }
+        try {
+            Context ctx = getContext();
+            Uri uri = Uri.parse(uriStr);
+            InputStream in = ctx.getContentResolver().openInputStream(uri);
+            if (in == null) { call.reject("open fail"); return; }
+
+            File base = ctx.getFilesDir();
+            File imagesDir = new File(base, "images");
+            if (!imagesDir.exists()) imagesDir.mkdirs();
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            try {
+                String marker = ",\"images\":{";
+                StringBuilder records = new StringBuilder();
+                boolean hasImages = readUntil(reader, records, marker);
+
+                String recordsJson = hasImages ? (records.toString() + "}") : records.toString();
+                validateJsonObject(recordsJson);   // 先校验, 避免写坏 data.json
+
+                int imgCount = hasImages ? parseImages(reader, imagesDir) : 0;
+
+                writeFile(new File(base, "data.json"), recordsJson);
+
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("images", imgCount);
+                call.resolve(ret);
+            } finally {
+                try { reader.close(); } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            call.reject("import error: " + e.getMessage());
+        }
+    }
+
+    // 读取直到遇到 marker(不含 marker), 返回是否找到
+    private boolean readUntil(BufferedReader reader, StringBuilder sb, String marker) throws Exception {
+        int m = marker.length();
+        while (true) {
+            int c = reader.read();
+            if (c == -1) return false;
+            sb.append((char) c);
+            if (sb.length() >= m) {
+                boolean match = true;
+                for (int i = 0; i < m; i++) {
+                    if (sb.charAt(sb.length() - m + i) != marker.charAt(i)) { match = false; break; }
+                }
+                if (match) {
+                    sb.setLength(sb.length() - m);
+                    return true;
+                }
+            }
+        }
+    }
+
+    // 校验字符串是合法 JSON 对象(能完整解析)
+    private void validateJsonObject(String json) throws Exception {
+        JsonReader r = new JsonReader(new StringReader(json));
+        r.beginObject();
+        while (r.hasNext()) { r.nextName(); r.skipValue(); }
+        r.endObject();
+        r.close();
+    }
+
+    // 解析 images 部分(前面已消费 ,"images":{): "name":"base64", ... }
+    private int parseImages(BufferedReader reader, File imagesDir) throws Exception {
+        int count = 0;
+        int c = reader.read();
+        if (c == -1) throw new Exception("unexpected EOF");
+        if (c == '}') return 0;   // 空 images 对象
+        while (c == '"') {
+            String name = readQuoted(reader);
+            c = reader.read();
+            if (c != ':') throw new Exception("bad images format");
+            c = reader.read();
+            if (c != '"') throw new Exception("bad images format");
+            writeImageBase64Stream(reader, new File(imagesDir, name));
+            count++;
+            c = reader.read();
+            if (c == ',') {
+                c = reader.read();
+            } else if (c == '}') {
+                break;
+            } else {
+                throw new Exception("bad images format");
+            }
+        }
+        return count;
+    }
+
+    // 读取引号包裹的字符串(不含闭合引号)
+    private String readQuoted(BufferedReader reader) throws Exception {
+        StringBuilder sb = new StringBuilder();
+        while (true) {
+            int c = reader.read();
+            if (c == -1) throw new Exception("unexpected EOF");
+            if (c == '"') return sb.toString();
+            sb.append((char) c);
+        }
+    }
+
+    // 流式读取 base64 直到闭合引号, 分块解码写入文件
+    private void writeImageBase64Stream(BufferedReader reader, File outFile) throws Exception {
+        FileOutputStream fos = new FileOutputStream(outFile);
+        char[] buf = new char[20480];  // 与导出块一致: 15360 字节 -> 20480 字符
+        try {
+            while (true) {
+                int n = 0;
+                while (n < buf.length) {
+                    int c = reader.read();
+                    if (c == -1) throw new Exception("unexpected EOF in base64");
+                    if (c == '"') {
+                        if (n > 0) {
+                            byte[] bytes = Base64.decode(new String(buf, 0, n), Base64.DEFAULT);
+                            fos.write(bytes);
+                        }
+                        return;
+                    }
+                    buf[n++] = (char) c;
+                }
+                byte[] bytes = Base64.decode(new String(buf, 0, n), Base64.DEFAULT);
+                fos.write(bytes);
+            }
+        } finally {
+            try { fos.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    // 覆盖写文件
+    private void writeFile(File f, String content) throws Exception {
+        FileOutputStream fos = new FileOutputStream(f);
+        try { fos.write(content.getBytes(StandardCharsets.UTF_8)); } finally { fos.close(); }
     }
 }

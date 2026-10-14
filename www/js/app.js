@@ -32,6 +32,7 @@
   var HeicConvertPlugin = makeNativePlugin("HeicConvert");
   var FilePickerPlugin = makeNativePlugin("FilePicker");
   var FullscreenPlugin = makeNativePlugin("Fullscreen");
+  var ShopLauncherPlugin = makeNativePlugin("ShopLauncher");
 
   // ------------------------------------------------------------------
   // 数据
@@ -52,7 +53,6 @@
     filterCountUnreleased: $("filterCountUnreleased"),
     searchWrap: $("searchWrap"),
     searchInput: $("searchInput"),
-    searchScope: $("searchScope"),
     btnSearchSubmit: $("btnSearchSubmit"),
     searchSug: $("searchSug"),
     btnSearch: $("btnSearch"),
@@ -69,19 +69,21 @@
     modalTitle: $("modalTitle"),
     btnModalClose: $("btnModalClose"),
     inpName: $("inpName"),
+    inpSearchKeyword: $("inpSearchKeyword"),
     inpBrand: $("inpBrand"),
     btnAddBrand: $("btnAddBrand"),
     brandChips: $("brandChips"),
     kindBought: $("kindBought"),
     kindWish: $("kindWish"),
     kindUnreleased: $("kindUnreleased"),
+    inpCategory: $("inpCategory"),
     priceGroup: $("priceGroup"),
     inpPrice: $("inpPrice"),
     dateGroup: $("dateGroup"),
     inpDate: $("inpDate"),
-    releaseDateGroup: $("releaseDateGroup"),
+    releaseMonthGroup: $("releaseMonthGroup"),
     releasePriceGroup: $("releasePriceGroup"),
-    inpReleaseDate: $("inpReleaseDate"),
+    inpReleaseMonth: $("inpReleaseMonth"),
     inpReleasePrice: $("inpReleasePrice"),
     inpReleasePriceUnit: $("inpReleasePriceUnit"),
     imgGrid: $("imgGrid"),
@@ -237,7 +239,6 @@
     ui.kindUnreleased.classList.toggle("active", kind === "unreleased");
     ui.priceGroup.classList.toggle("hidden", kind !== "bought");
     ui.dateGroup.classList.toggle("hidden", kind !== "bought");
-    if (ui.releaseDateGroup) ui.releaseDateGroup.classList.toggle("hidden", kind !== "unreleased");
     if (ui.releasePriceGroup) ui.releasePriceGroup.classList.toggle("hidden", kind !== "unreleased");
   }
 
@@ -472,6 +473,19 @@
       loadStoreData(backup);
       await this.save();
       return store.list.length;
+    },
+
+    // 原生流式导入: 传入 content uri, 原生边读边写图片, records 写回 data.json
+    async importFromUri(uri) {
+      var bs = BackupScannerPlugin;
+      if (!bs || !bs.importFromUri) throw new Error("当前环境不支持流式导入");
+      var r = await bs.importFromUri({ uri: uri });
+      if (!r || !r.ok) throw new Error("导入未返回成功");
+      // 重新读取 data.json 恢复内存 store
+      if (!isNative) return 0;
+      var data = await Filesystem.readFile({ path: "data.json", directory: DATA_DIR, encoding: "utf8" });
+      loadStoreData(JSON.parse(data.data));
+      return store.list.length;
     }
   };
 
@@ -490,13 +504,15 @@
       var r = {
         id: it.id || genId(),
         name: typeof it.name === "string" ? it.name : "",
+        searchKeyword: typeof it.searchKeyword === "string" ? it.searchKeyword : "",
         brand: normalizeBrands(it.brand),
         kind: (it.kind === "bought" || it.kind === "unreleased") ? it.kind : "wish",
         price: (it.kind === "bought" && it.price != null) ? it.price : null,
         date: typeof it.date === "string" ? it.date : "",
-        releaseDate: typeof it.releaseDate === "string" ? it.releaseDate : "",
+        releaseMonth: typeof it.releaseMonth === "string" ? it.releaseMonth : "",
         releasePrice: (typeof it.releasePrice === "number" && isFinite(it.releasePrice)) ? it.releasePrice : null,
         releasePriceUnit: (it.releasePriceUnit === "元" || it.releasePriceUnit === "美元" || it.releasePriceUnit === "日元") ? it.releasePriceUnit : "元",
+        category: (CATEGORIES.indexOf(it.category) >= 0) ? it.category : "",
         images: Array.isArray(it.images) ? it.images : [],
         tags: Array.isArray(it.tags) ? it.tags.filter(function (t) { return typeof t === "string" && t.length > 0; }) : [],
         createdAt: it.createdAt || 0,
@@ -748,7 +764,7 @@
   }
 
   function sortRecords(arr) {
-    // 已买: 按用户选择的排序(时间/价格); 全部/未买: 按添加时间(新→旧)
+    // 已买: 按用户选择的排序(时间/价格); 其他: 状态→发售时间→手动→创建时间
     var s = onlyBoughtFilter() ? getSort() : "time";
     return arr.slice().sort(function (a, b) {
       if (onlyBoughtFilter()) {
@@ -765,7 +781,15 @@
         // 已买"时间"排序: 日期新→旧, 同日期添加时间新→旧
         return byDateThenCreated(a, b);
       }
-      // 全部/未买: 有 sortOrder 的按手动顺序排上面, 没有的按添加时间(新→旧)排下面
+      // 其他筛选: 状态(未发售在上) → 发售时间(都填了按月份晚→早) → 手动排序 → 创建时间
+      var ka = a.kind === "unreleased" ? 0 : 1;
+      var kb = b.kind === "unreleased" ? 0 : 1;
+      if (ka !== kb) return ka - kb;
+      var ra = a.releaseMonth || "";
+      var rb = b.releaseMonth || "";
+      if (ra !== "" && rb !== "" && ra !== rb) {
+        return rb.localeCompare(ra); // 都填了发售时间: 月份从晚到早(晚在上、早在下)
+      }
       var aHas = typeof a.sortOrder === "number";
       var bHas = typeof b.sortOrder === "number";
       if (aHas && bHas) return a.sortOrder - b.sortOrder;
@@ -796,6 +820,9 @@
     if (tb) tb.classList.add("hidden");
     sortPrevFilters = Array.from(activeFilters);   // 记录原筛选, 退出排序时恢复
     activeFilters = new Set(["bought", "wish", "unreleased"]);
+    // 清空搜索词, 确保排序模式是对全部词条排序, 而不是只排搜索出的部分
+    if (ui.searchInput) ui.searchInput.value = "";
+    if (ui.searchSug) ui.searchSug.classList.add("hidden");
     renderList();
     refreshTopBar();
   }
@@ -1036,7 +1063,6 @@
   function saveUiState() {
     try {
       var st = {
-        scope: ui.searchScope ? ui.searchScope.value : "all",
         filters: Array.from(activeFilters),
         sort: ui.sortSelect ? ui.sortSelect.value : "time"
       };
@@ -1060,34 +1086,61 @@
   // ------------------------------------------------------------------
   // 列表渲染
   // ------------------------------------------------------------------
-  function filteredList() {
-    var kw = ui.searchInput.value.trim().toLowerCase();
-    var scope = ui.searchScope ? ui.searchScope.value : "all";
+  // 仅按状态筛选(不含搜索关键词)
+  function statusFilteredList() {
     return store.list.filter(function (it) {
-      var ok = activeFilters.has(it.kind);
-      if (!ok) return false;
-      if (kw) {
-        var nameHit = (it.name || "").toLowerCase().indexOf(kw) >= 0;
+      return activeFilters.has(it.kind);
+    });
+  }
+
+  // 仅按搜索关键词过滤(传入已排序数组), 支持空格分隔多关键词(AND)
+  // 类别(必选分类, 旧数据可为空)
+  var CATEGORIES = ["手办", "小比例车模", "可动人偶", "小比例可动人偶", "机甲", "钢普拉"];
+  // 父包含子: 搜"机甲"命中"钢普拉", 搜"可动人偶"命中"小比例可动人偶"
+  function categoryMatches(cat, kw) {
+    if (!cat) return false;
+    if (kw === "机甲" && cat === "钢普拉") return true;   // 钢普拉是机甲的子集
+    return cat.indexOf(kw) >= 0;                          // 局部匹配
+  }
+
+  // 显示用类别: 子集显示为父类(钢普拉→机甲, 小比例可动人偶→可动人偶)
+  function categoryDisplay(cat) {
+    if (cat === "钢普拉") return "机甲";
+    if (cat === "小比例可动人偶") return "可动人偶";
+    return cat;
+  }
+
+  // 清空搜索关键词(关闭搜索栏/跳转详情/计划/随拍时调用)
+  function clearSearch() {
+    if (ui.searchInput) ui.searchInput.value = "";
+    if (ui.searchSug) ui.searchSug.classList.add("hidden");
+  }
+
+  function searchFilter(list) {
+    var kw = ui.searchInput.value.trim().toLowerCase();
+    if (!kw) return list;
+    var kws = kw.split(/\s+/).filter(Boolean);
+    if (kws.length === 0) return list;
+    return list.filter(function (it) {
+      return kws.every(function (k) {
+        var nameHit = (it.name || "").toLowerCase().indexOf(k) >= 0;
         var brandHit = (it.brand || []).some(function (b) {
-          return String(b || "").toLowerCase().indexOf(kw) >= 0;
+          return String(b || "").toLowerCase().indexOf(k) >= 0;
         });
         var tagHit = (it.tags || []).some(function (t) {
-          return String(t || "").toLowerCase().indexOf(kw) >= 0;
+          return String(t || "").toLowerCase().indexOf(k) >= 0;
         });
-        var hit;
-        if (scope === "name") hit = nameHit;
-        else if (scope === "tag") hit = brandHit || tagHit;
-        else hit = nameHit || brandHit || tagHit;
-        if (!hit) return false;
-      }
-      return true;
+        var catHit = categoryMatches(it.category, k);
+        return nameHit || brandHit || tagHit || catHit;
+      });
     });
   }
 
   // 搜索提示: 统计匹配关键词的 brand/tag 数量, 按数量降序
   function buildSuggestions(kw) {
-    var kwLower = kw.trim().toLowerCase();
-    if (!kwLower) return [];
+    var parts = kw.trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return [];
+    var kwLower = parts[parts.length - 1].toLowerCase();  // 只对最后一个关键词补全
     var counter = {};
     store.list.forEach(function (it) {
       var keys = [];
@@ -1122,8 +1175,10 @@
       item.type = "button";
       item.textContent = s.text;
       item.addEventListener("click", function () {
-        ui.searchInput.value = s.text;
-        if (ui.searchScope) ui.searchScope.value = "all";
+        var cur = ui.searchInput.value.trim();
+        var parts = cur.split(/\s+/).filter(Boolean);
+        parts[parts.length - 1] = s.text;
+        ui.searchInput.value = parts.join(" ");
         renderSuggestions();
         renderList();
       });
@@ -1170,7 +1225,7 @@
   function renderList() {
     updateSortVisibility();
     updateCounts();
-    var items = sortRecords(filteredList());
+    var items = searchFilter(sortRecords(statusFilteredList()));
     if (sortMode) sortItems = items;
     ui.cardList.innerHTML = "";
 
@@ -1207,8 +1262,8 @@
 
       var brandHtml = (it.brand && it.brand.length)
         ? '<div class="card-brand">' + esc(it.brand.join("/")) + '</div>' : '';
-      var releaseHtml = (it.kind === "unreleased" && it.releaseDate)
-        ? '<div class="card-release">预计' + esc(it.releaseDate) + '发售</div>' : '';
+      var releaseHtml = (it.kind === "unreleased" && it.releaseMonth)
+        ? '<div class="card-release">预计' + esc(monthLabel(it.releaseMonth)) + '发售</div>' : '';
 
       var metaHtml = meta
         ? '<div class="card-meta">' + meta + '</div>' : '';
@@ -1376,10 +1431,13 @@
     return items;
   }
 
+  var planShowingHistory = false;
+
   function renderPlan() {
     var dv = ui.planView;
     if (!dv) return;
     dv.innerHTML = "";
+    if (planShowingHistory) { renderPlanHistory(); return; }
 
     var items = planDisplayItems();
     var cm = currentMonth();
@@ -1402,6 +1460,19 @@
     monthTotal.textContent = "本月花费 ¥" + formatMoney(monthSum);
     top.appendChild(monthTotal);
     dv.appendChild(top);
+
+    // 历史入口: 单独一行
+    var histRow = document.createElement("div");
+    histRow.className = "plan-history-row";
+    var histBtn = document.createElement("button");
+    histBtn.className = "plan-history-btn";
+    histBtn.textContent = "历史";
+    histBtn.addEventListener("click", function () {
+      planShowingHistory = true;
+      renderPlan();
+    });
+    histRow.appendChild(histBtn);
+    dv.appendChild(histRow);
 
     if (items.length === 0) {
       var empty = document.createElement("div");
@@ -1490,8 +1561,113 @@
     dv.appendChild(fab);
   }
 
+  // 过往购买记录: 已购物品按过去月份分组(最近过去月在上, 月内金额低→高)
+  function renderPlanHistory() {
+    var dv = ui.planView;
+    if (!dv) return;
+    dv.innerHTML = "";
+
+    var top = document.createElement("div");
+    top.className = "plan-topbar";
+    var back = document.createElement("button");
+    back.className = "plan-back";
+    back.textContent = "‹";
+    back.addEventListener("click", function () { planShowingHistory = false; renderPlan(); });
+    var title = document.createElement("span");
+    title.className = "plan-title";
+    title.textContent = "过往记录";
+    top.appendChild(back);
+    top.appendChild(title);
+    var planBtn = document.createElement("button");
+    planBtn.className = "plan-topbar-btn";
+    planBtn.textContent = "计划";
+    planBtn.addEventListener("click", function () { planShowingHistory = false; renderPlan(); });
+    top.appendChild(planBtn);
+    dv.appendChild(top);
+
+    var cm = currentMonth();
+    var past = store.list.filter(function (m) {
+      return m.kind === "bought" && m.date && (m.date.slice(0, 7) < cm);
+    });
+
+    if (past.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "plan-empty";
+      empty.textContent = "还没有过往购买记录";
+      dv.appendChild(empty);
+      return;
+    }
+
+    var groups = {};
+    past.forEach(function (m) {
+      var mo = m.date.slice(0, 7);
+      if (!groups[mo]) groups[mo] = [];
+      groups[mo].push(m);
+    });
+
+    Object.keys(groups).sort().reverse().forEach(function (mo) {
+      var list = groups[mo];
+      list.sort(function (a, b) {
+        var pa = a.price != null ? parseFloat(a.price) : Infinity;
+        var pb = b.price != null ? parseFloat(b.price) : Infinity;
+        if (pa !== pb) return pa - pb;
+        return (a.createdAt || 0) - (b.createdAt || 0);
+      });
+      var total = list.reduce(function (s, m) { return s + (m.price != null ? parseFloat(m.price) : 0); }, 0);
+
+      var box = document.createElement("div");
+      box.className = "plan-month";
+      var head = document.createElement("div");
+      head.className = "plan-month-head";
+      var nm = document.createElement("span");
+      nm.className = "plan-month-name";
+      nm.textContent = monthLabel(mo);
+      var tt = document.createElement("span");
+      tt.className = "plan-month-total";
+      tt.textContent = "合计 ¥" + formatMoney(total);
+      head.appendChild(nm);
+      head.appendChild(tt);
+      box.appendChild(head);
+
+      list.forEach(function (m) {
+        var row = document.createElement("div");
+        row.className = "plan-item";
+        row.addEventListener("click", function () {
+          fromPlanView = true;
+          openDetail(m.id, false);
+        });
+        var th = document.createElement("img");
+        th.className = "plan-item-thumb";
+        var fn = m.images && m.images[0];
+        if (fn) storage.thumbUrl(fn).then(function (u) { if (u) th.src = u; });
+        row.appendChild(th);
+        var info = document.createElement("div");
+        info.className = "plan-item-info";
+        var rn = document.createElement("div");
+        rn.className = "plan-item-name";
+        rn.textContent = m.name || "";
+        info.appendChild(rn);
+        if (m.brand && m.brand.length) {
+          var rb = document.createElement("div");
+          rb.className = "plan-item-brand";
+          rb.textContent = m.brand.join(" / ");
+          info.appendChild(rb);
+        }
+        var ra = document.createElement("div");
+        ra.className = "plan-item-amount bought";
+        ra.textContent = "购买金额 ¥" + formatMoney(m.price != null ? m.price : 0);
+        info.appendChild(ra);
+        row.appendChild(info);
+        box.appendChild(row);
+      });
+      dv.appendChild(box);
+    });
+  }
+
   function enterPlan() {
     if (viewingId) goBackToList();
+    planShowingHistory = false;
+    clearSearch();
     // 清理过期计划: month 已过的自动取消(删除)
     var cm = currentMonth();
     var before = store.plans.length;
@@ -1696,9 +1872,14 @@
     if (inp) kw = inp.value.trim().toLowerCase();
     var list = store.shots.slice().sort(function (a, b) { return (b.createdAt || 0) - (a.createdAt || 0); });
     if (kw) {
-      list = list.filter(function (s) {
-        return (s.tags || []).some(function (t) { return String(t).toLowerCase().indexOf(kw) >= 0; });
-      });
+      var kws = kw.split(/\s+/).filter(Boolean);
+      if (kws.length) {
+        list = list.filter(function (s) {
+          return kws.every(function (k) {
+            return (s.tags || []).some(function (t) { return String(t).toLowerCase().indexOf(k) >= 0; });
+          });
+        });
+      }
     }
     return list;
   }
@@ -1768,6 +1949,7 @@
 
   function enterShot() {
     if (viewingId) goBackToList();
+    clearSearch();
     var tb = document.getElementById("toolbar");
     var sw = document.getElementById("searchWrap");
     var fab = document.getElementById("btnAdd");
@@ -1999,6 +2181,30 @@
     toast("已删除");
   }
 
+  // 跳转购物平台 App 搜索(原生 ShopLauncher: 深链直达 -> 启动App -> 回退网页)
+  function openShopSearch(platform, it) {
+    if (!it) return;
+    var kw = (it.searchKeyword && it.searchKeyword.trim()) ? it.searchKeyword.trim() : "";
+    if (!kw) {
+      kw = it.name || "";
+      if (it.brand && it.brand.length) kw += " " + it.brand[0];
+      kw = kw.trim();
+    }
+    if (!kw) { toast("没有可搜索的关键词"); return; }
+    var q = encodeURIComponent(kw);
+    var webUrl = platform === "taobao"
+      ? "https://s.taobao.com/search?q=" + q
+      : "https://mobile.yangkeduo.com/search_result.html?search_key=" + q;
+    var sl = ShopLauncherPlugin || makeNativePlugin("ShopLauncher");
+    if (sl && sl.openSearch) {
+      sl.openSearch({ platform: platform, keyword: kw }).catch(function () {
+        window.open(webUrl, "_blank");
+      });
+    } else {
+      window.open(webUrl, "_blank");
+    }
+  }
+
   function openDetail(id, fromList) {
     var it = store.list.find(function (x) { return x.id === id; });
     if (!it) return;
@@ -2012,6 +2218,7 @@
     document.documentElement.style.overflow = "hidden";
     document.body.style.overflow = "hidden";
     enterDetailView(true);
+    clearSearch();
     var dv = ui.detailView || ui.cardList;
     dv.innerHTML = "";
     if (ui.detailView) ui.detailView.classList.remove("hidden");
@@ -2072,6 +2279,11 @@
       info += '<div class="detail-row"><span class="detail-label">品牌</span><span class="detail-value">' + esc(it.brand.join("/")) + '</span></div>';
     }
 
+    // 已买/未买: 有发售时间则显示在品牌下面
+    if ((it.kind === "bought" || it.kind === "wish") && it.releaseMonth) {
+      info += '<div class="detail-row"><span class="detail-label">发售时间</span><span class="detail-value">' + esc(monthLabel(it.releaseMonth)) + '</span></div>';
+    }
+
     if (it.kind === "bought") {
       // 第2行：购买价格
       if (it.price != null && it.price !== "") {
@@ -2083,25 +2295,29 @@
       }
     } else if (it.kind === "unreleased") {
       info += '<div class="detail-row"><span class="detail-label">状态</span><span class="detail-unreleased">未发售</span></div>';
-      if (it.releaseDate) {
-        info += '<div class="detail-row"><span class="detail-label">预计发售</span><span class="detail-value">' + esc(it.releaseDate) + '</span></div>';
+      if (it.releaseMonth) {
+        info += '<div class="detail-row"><span class="detail-label">预计发售</span><span class="detail-value">' + esc(monthLabel(it.releaseMonth)) + '</span></div>';
       }
       if (it.releasePrice != null && it.releasePrice !== "") {
         info += '<div class="detail-row"><span class="detail-label">预计价格</span><span class="detail-price">' + esc(it.releasePrice) + esc(it.releasePriceUnit || "元") + '</span></div>';
       }
-    } else {
-      info += '<div class="detail-row"><span class="detail-label">状态</span><span class="detail-wish">尚未购买 · 心愿收藏</span></div>';
     }
     info += '</div>';
 
     detail.innerHTML = info;
     dv.appendChild(detail);
 
-    // 标签区: 详情页展示自定义标签(品牌已在上方信息区显示)
+    // 标签区: 分类(异色, 第一个) + 自定义标签
     var vTags = (it.tags || []).filter(function (t) { return typeof t === "string" && t.length > 0; });
-    if (vTags.length > 0) {
+    if (it.category || vTags.length > 0) {
       var tagBox = document.createElement("div");
       tagBox.className = "detail-tags";
+      if (it.category) {
+        var catChip = document.createElement("span");
+        catChip.className = "tag-chip category";
+        catChip.textContent = categoryDisplay(it.category);
+        tagBox.appendChild(catChip);
+      }
       vTags.forEach(function (t) {
         var chip = document.createElement("span");
         chip.className = "tag-chip";
@@ -2142,16 +2358,31 @@
     }
     detail.appendChild(imgBox);
 
+    // 购物平台搜索: 淘宝 / 拼多多
+    var shopbar = document.createElement("div");
+    shopbar.className = "detail-shopbar";
+    var tbBtn = document.createElement("button");
+    tbBtn.className = "btn-shop-taobao";
+    tbBtn.innerHTML = '<span class="shop-ico">🔍</span><span>淘宝搜同款</span>';
+    tbBtn.addEventListener("click", function () { openShopSearch("taobao", it); });
+    var pddBtn = document.createElement("button");
+    pddBtn.className = "btn-shop-pdd";
+    pddBtn.innerHTML = '<span class="shop-ico">🔍</span><span>拼多多搜同款</span>';
+    pddBtn.addEventListener("click", function () { openShopSearch("pinduoduo", it); });
+    shopbar.appendChild(tbBtn);
+    shopbar.appendChild(pddBtn);
+    dv.appendChild(shopbar);
+
     // 底部操作栏: 编辑 / 删除 两个大按钮, 层次分明
     var actbar = document.createElement("div");
     actbar.className = "detail-actbar";
     var editBtn = document.createElement("button");
     editBtn.className = "btn-edit-detail";
-    editBtn.textContent = "编辑";
+    editBtn.innerHTML = '<span class="act-ico">✏️</span><span>编辑</span>';
     editBtn.addEventListener("click", function () { openEdit(id); });
     var delBtn = document.createElement("button");
     delBtn.className = "btn-del-detail";
-    delBtn.textContent = "删除";
+    delBtn.innerHTML = '<span class="act-ico">🗑️</span><span>删除</span>';
     delBtn.addEventListener("click", function () { openConfirm(id); });
     actbar.appendChild(editBtn);
     actbar.appendChild(delBtn);
@@ -2173,10 +2404,12 @@
   // ------------------------------------------------------------------
   function resetModal() {
     ui.inpName.value = "";
+    if (ui.inpSearchKeyword) ui.inpSearchKeyword.value = "";
     ui.inpBrand.value = "";
     ui.inpPrice.value = "";
     ui.inpDate.value = "";
-    if (ui.inpReleaseDate) ui.inpReleaseDate.value = "";
+    if (ui.inpCategory) ui.inpCategory.value = "";
+    if (ui.inpReleaseMonth) ui.inpReleaseMonth.value = "";
     if (ui.inpReleasePrice) ui.inpReleasePrice.value = "";
     if (ui.inpReleasePriceUnit) ui.inpReleasePriceUnit.value = "元";
     setKind("wish");
@@ -2210,11 +2443,13 @@
     if (!it) return;
     editingId = id;
     ui.inpName.value = it.name || "";
+    if (ui.inpSearchKeyword) ui.inpSearchKeyword.value = it.searchKeyword || "";
     ui.inpBrand.value = "";
     setKind(it.kind === "bought" ? "bought" : (it.kind === "unreleased" ? "unreleased" : "wish"));
     ui.inpPrice.value = it.price != null && it.price !== "" ? it.price : "";
     ui.inpDate.value = it.date || "";
-    if (ui.inpReleaseDate) ui.inpReleaseDate.value = it.releaseDate || "";
+    if (ui.inpCategory) ui.inpCategory.value = it.category || "";
+    if (ui.inpReleaseMonth) ui.inpReleaseMonth.value = it.releaseMonth || "";
     if (ui.inpReleasePrice) ui.inpReleasePrice.value = it.releasePrice != null && it.releasePrice !== "" ? it.releasePrice : "";
     if (ui.inpReleasePriceUnit) ui.inpReleasePriceUnit.value = it.releasePriceUnit || "元";
 
@@ -2415,6 +2650,9 @@
       ui.inpTag.value = "";
     }
     if (pendingBrands.length === 0) { showAlert("请输入品牌 / 厂商"); return; }
+    // 类别必选
+    var category = ui.inpCategory ? ui.inpCategory.value : "";
+    if (CATEGORIES.indexOf(category) < 0) { showAlert("请选择类别"); return; }
 
     // 已买商品强制校验价格与日期(不能为空), 校验失败弹窗提示
     var kind = getKind();
@@ -2425,7 +2663,7 @@
       if (isNaN(priceVal) || priceVal < 0) { showAlert("购买价格格式不正确"); return; }
       if (!ui.inpDate.value) { showAlert("已买商品请填写购买日期"); return; }
     }
-    // 未发售: 预计发售时间/预计价格均为选填, 仅当价格填写时校验格式
+    // 未发售: 预计价格选填, 仅当填写时校验格式
     if (kind === "unreleased") {
       var rpv = ui.inpReleasePrice ? ui.inpReleasePrice.value.trim() : "";
       if (rpv !== "") {
@@ -2439,12 +2677,12 @@
     ui.btnSave.textContent = "保存中…";
     try {
 
-    var record = { name: name, brand: pendingBrands.slice(), kind: kind, price: null, date: "", releaseDate: "", releasePrice: null, releasePriceUnit: "元", tags: pendingTags.slice() };
+    var record = { name: name, searchKeyword: (ui.inpSearchKeyword ? ui.inpSearchKeyword.value.trim() : ""), brand: pendingBrands.slice(), kind: kind, category: category, price: null, date: "", releaseMonth: "", releasePrice: null, releasePriceUnit: "元", tags: pendingTags.slice() };
+    record.releaseMonth = ui.inpReleaseMonth ? ui.inpReleaseMonth.value.trim() : "";
     if (record.kind === "bought") {
       record.price = parseFloat(ui.inpPrice.value.trim());
       record.date = ui.inpDate.value;
     } else if (record.kind === "unreleased") {
-      record.releaseDate = ui.inpReleaseDate ? ui.inpReleaseDate.value.trim() : "";
       var rpv2 = ui.inpReleasePrice ? ui.inpReleasePrice.value.trim() : "";
       record.releasePrice = rpv2 !== "" ? parseFloat(rpv2) : null;
       record.releasePriceUnit = (ui.inpReleasePriceUnit && ui.inpReleasePriceUnit.value) || "元";
@@ -2507,14 +2745,18 @@
     } else {
       record.id = genId();
       record.createdAt = Date.now();
-      // 新词条默认排最上面: 取当前最小 sortOrder - 1, 保证新词条顶到列表最前
-      var minOrder = null;
-      store.list.forEach(function (x) {
-        if (typeof x.sortOrder === "number") {
-          if (minOrder === null || x.sortOrder < minOrder) minOrder = x.sortOrder;
-        }
-      });
-      record.sortOrder = (minOrder === null) ? 0 : (minOrder - 1);
+      // 未填发售时间的新词条排最上(手动顺序); 已填的由月份排序决定位置, 不参与"最上"
+      if (record.releaseMonth) {
+        record.sortOrder = null;
+      } else {
+        var minOrder = null;
+        store.list.forEach(function (x) {
+          if (typeof x.sortOrder === "number") {
+            if (minOrder === null || x.sortOrder < minOrder) minOrder = x.sortOrder;
+          }
+        });
+        record.sortOrder = (minOrder === null) ? 0 : (minOrder - 1);
+      }
       store.list.push(record);
       toast("已添加");
     }
@@ -2639,7 +2881,7 @@
         try { activeInput.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (e) { activeInput.scrollIntoView(); }
       }, 120);
     }
-    ["inpName", "inpBrand", "inpTag", "inpPrice", "inpReleaseDate", "inpReleasePrice", "planPrice", "shotTagInput", "shotDesc"].forEach(function (id) {
+    ["inpName", "inpSearchKeyword", "inpBrand", "inpTag", "inpPrice", "inpReleaseMonth", "inpReleasePrice", "planPrice", "shotTagInput", "shotDesc"].forEach(function (id) {
       var el = document.getElementById(id);
       if (el) {
         el.addEventListener("focus", function () {
@@ -2685,8 +2927,7 @@
         ui.searchInput.focus();
       } else {
         // 关闭搜索栏时清空输入框和提示
-        if (ui.searchInput) ui.searchInput.value = "";
-        if (ui.searchSug) ui.searchSug.classList.add("hidden");
+        clearSearch();
         renderList();
       }
       refreshTopBar();
@@ -2695,7 +2936,7 @@
     document.addEventListener("click", function (e) {
       if (ui.searchSug && !ui.searchSug.classList.contains("hidden")) {
         var t = e.target;
-        var inside = ui.searchSug.contains(t) || t === ui.searchInput || t === ui.searchScope || t === ui.btnSearchSubmit;
+        var inside = ui.searchSug.contains(t) || t === ui.searchInput || t === ui.btnSearchSubmit;
         if (!inside) ui.searchSug.classList.add("hidden");
       }
     });
@@ -2710,7 +2951,7 @@
         ui.searchSug.classList.add("hidden");
       }
     }, { passive: true });
-    if (ui.searchScope) ui.searchScope.addEventListener("change", function () { saveUiState(); renderList(); });
+
 
     // 导出备份: 先弹确认, 确认后才导出
     // 导出备份: 打开确认弹窗
@@ -2863,12 +3104,17 @@
           closeShotModal();
           return;
         }
-        // 3) 计划页 -> 返回列表
+        // 3) 详情页 -> 返回(计划/列表), 优先于计划/随拍页判断(详情压在其上)
+        if (viewingId) {
+          goBackToList();
+          return;
+        }
+        // 3.1) 计划页 -> 返回列表
         if (ui.planView && !ui.planView.classList.contains("hidden")) {
           exitPlan();
           return;
         }
-        // 3.1) 随拍页 -> 先清空搜索词, 再返回列表
+        // 3.2) 随拍页 -> 先清空搜索词, 再返回列表
         if (ui.shotView && !ui.shotView.classList.contains("hidden")) {
           var si = ui.shotView.querySelector(".shot-search");
           if (si && si.value.trim()) {
@@ -2877,11 +3123,6 @@
             return;
           }
           exitShot();
-          return;
-        }
-        // 3.5) 详情页 -> 返回列表(并恢复之前滚动位置)
-        if (viewingId) {
-          goBackToList();
           return;
         }
         // 4) 列表首页 -> 退出(返回桌面)
@@ -2894,12 +3135,26 @@
     window.addEventListener("resize", refreshTopBar);
   }
 
-  // 导入备份: 弹出系统文件选择器让用户选 json(通过隐藏 file input, 在 WebView 里可直接调用系统选择器)
-  function pickAndImport() {
+  // 导入备份: 用原生文件选择器拿 content uri, 再走原生流式导入
+  async function pickAndImport() {
     if (!isNative) { toast("导入仅在真机可用"); return; }
-    if (!ui.importInput) { toast("系统选择器不可用"); return; }
-    ui.importInput.value = "";   // 允许重新选择同一文件
-    ui.importInput.click();      // 直接打开文件选择器(选完才弹"正在导入")
+    var fp = FilePickerPlugin;
+    if (!fp || !fp.openAndRead) { toast("系统选择器不可用"); return; }
+    var picked = null;
+    try {
+      picked = await fp.openAndRead();
+    } catch (e) {
+      return;   // 取消选择
+    }
+    if (!picked || !picked.uri) return;
+    showImportWaiting();
+    try {
+      var cnt = await storage.importFromUri(picked.uri);
+      renderList();
+      showImportDone(cnt);
+    } catch (e) {
+      showImportFail("导入失败: " + (e && e.message || "文件格式错误"));
+    }
   }
 
   // 绑定导入文件 input 的 change
@@ -3366,6 +3621,7 @@
       HeicConvertPlugin = makeNativePlugin("HeicConvert");
       FilePickerPlugin = makeNativePlugin("FilePicker");
       FullscreenPlugin = makeNativePlugin("Fullscreen");
+      ShopLauncherPlugin = makeNativePlugin("ShopLauncher");
       bindEvents();
       setupScrollLock();
       refreshTopBar();

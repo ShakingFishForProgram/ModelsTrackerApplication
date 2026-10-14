@@ -77,7 +77,7 @@
       var kindLabel = it.kind === "bought" ? "已买" : (it.kind === "unreleased" ? "未发售" : "心愿");
       var releaseInfo = "";
       if (it.kind === "unreleased") {
-        if (it.releaseDate) releaseInfo += " ｜ 预计发售:" + esc(it.releaseDate);
+        if (it.releaseMonth) releaseInfo += " ｜ 预计发售:" + esc(it.releaseMonth);
         if (it.releasePrice != null) releaseInfo += " ｜ 预计价格:" + it.releasePrice + (it.releasePriceUnit || "元");
       }
       html += "<div class='item'>" + esc(it.name) + " ｜ " + esc(kindLabel) +

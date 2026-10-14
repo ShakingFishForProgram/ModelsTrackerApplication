@@ -15,11 +15,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-
 @CapacitorPlugin(name = "FilePicker")
 public class FilePicker extends Plugin {
 
@@ -28,6 +23,7 @@ public class FilePicker extends Plugin {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");   // 显示所有类型文件, 包括 .json
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
             startActivityForResult(call, intent, "pickResult");
         } catch (Exception e) {
@@ -49,15 +45,14 @@ public class FilePicker extends Plugin {
                 return;
             }
             Uri uri = data.getData();
+            // 尽量取得持久读权限, 便于 BackupScanner 后续流式读取
+            try {
+                getContext().getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
             String name = queryName(uri);
-            String content = readUri(uri);
-            if (content == null) {
-                call.reject("read-fail");
-                return;
-            }
             JSObject ret = new JSObject();
             ret.put("name", name != null ? name : "");
-            ret.put("content", content);
+            ret.put("uri", uri.toString());
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("read error: " + e.getMessage());
@@ -79,21 +74,5 @@ public class FilePicker extends Plugin {
             }
         } catch (Exception ignored) {}
         return uri.getLastPathSegment();
-    }
-
-    private String readUri(Uri uri) {
-        try {
-            InputStream in = getContext().getContentResolver().openInputStream(uri);
-            if (in == null) return null;
-            StringBuilder sb = new StringBuilder();
-            BufferedReader br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
-            char[] buf = new char[8192];
-            int n;
-            while ((n = br.read(buf)) != -1) sb.append(buf, 0, n);
-            try { br.close(); } catch (Exception ignored) {}
-            return sb.toString();
-        } catch (Exception e) {
-            return null;
-        }
     }
 }
